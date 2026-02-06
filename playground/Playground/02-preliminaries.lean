@@ -92,3 +92,5 @@ example (P : Nat → Prop) : (∀ n, (∀ m < n, P m) → P n) → ∀ n, P n :=
   grind
 
 end ax2_4_2
+
+#check WellFounded.induction
