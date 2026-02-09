@@ -223,35 +223,17 @@ inductive MultiStep : Term → Term → Prop
 lemma nv_no_step : NatV t → ¬ Step t t' := by
   induction t generalizing t'
   all_goals (
-    intro hnv
-    cases hnv
-    try contradiction
+    --improve grind
+    grind [Step, NatV]
   )
-  · intro s
-    cases s
-  · intro s
-    cases s
-    grind
 
 theorem determinism : Step t t₁ → Step t t₂ → t₁ = t₂ := by
   intro s1 s2
   induction s1 generalizing t₂ <;> cases s2
   all_goals (
-    try contradiction
-    try grind
+    --improve grind
+    try grind [nv_no_step, Step]
   )
-  · rename_i s
-    cases s
-    cases nv_no_step (by assumption) (by assumption)
-  · rename_i s ih
-    cases s
-    cases nv_no_step (by assumption) (by assumption)
-  · rename_i s
-    cases s
-    cases nv_no_step (by assumption) (by assumption)
-  · rename_i s ih
-    cases s
-    cases nv_no_step (by assumption) (by assumption)
 
 def Normal : Term → Prop
 | t => ¬ ∃ t', Step t t'
@@ -285,10 +267,106 @@ inductive BigStep : Term → Term → Prop
 | IsZeroZero : BigStep t Term.Zero → BigStep (Term.IsZero t) Term.True
 | IsZeroSucc : NatV v → BigStep t (Term.Succ v) → BigStep (Term.IsZero t) Term.False
 
-theorem big_step_is_multi_step : BigStep t v ↔ MultiStep t v := by
+theorem step_implies_big_step : Value v → Step t t' → BigStep t v → BigStep t' v := by
+  intro hv hs hbs
+  unhygienic induction t generalizing t' v <;>
+  { grind (splits := 20) [BigStep, Value, NatV, Step] }
+
+theorem big_step_implies_step : Value v → Step t' t → BigStep t v → BigStep t' v := by
+  intro hv hs hbs
+  unhygienic induction t generalizing t' v <;>
+  { grind (splits := 20) [BigStep, Value, NatV, Step] }
+
+theorem multi_step_trans : MultiStep t t' → MultiStep t' t'' → MultiStep t t'' := by
+  intro h
+  induction h <;> grind [MultiStep]
+
+def size : Term → Nat
+| .True => 1
+| .False => 1
+| .If (c : Term) (t : Term) (e : Term) => 1 + size c + size t + size e
+| .Zero => 1
+| .Succ (t : Term) => 1 + size t
+| .Pred (t : Term) => 1 + size t
+| .IsZero (t : Term) => 1 + size t
+
+theorem step_size : Step t t' → size t > size t' := by
+  intro h
+  unhygienic induction h <;> grind [size]
+
+theorem multi_step_size : MultiStep t t' → size t > size t' ∨ t = t' := by
+  intro h
+  unhygienic induction h
+  { simp }
+  cases a_ih <;>
+  { have step_sz := step_size a
+    grind [step_size] }
+
+theorem multi_step_if_eval_true : MultiStep t Term.True → MultiStep ((Term.If t) p n) p := by
+  intro hv
+  unhygienic cases hv
+  { apply MultiStep.Step
+    { exact Step.IfTrue }
+    { exact MultiStep.Refl } }
+  apply MultiStep.Step
+  { exact Step.IfStep a }
+  apply multi_step_if_eval_true
+  exact a_1
+termination_by size t
+decreasing_by exact step_size a
+
+
+theorem multi_step_if_eval_false : MultiStep t Term.False → MultiStep ((Term.If t) p n) n := by
+  intro hv
+  unhygienic cases hv
+  { apply MultiStep.Step
+    { exact Step.IfFalse }
+    { exact MultiStep.Refl } }
+  apply MultiStep.Step
+  { exact Step.IfStep a }
+  apply multi_step_if_eval_false
+  exact a_1
+termination_by size t
+decreasing_by exact step_size a
+
+theorem aug_multi_step : ∀ f : Term → Term,
+  (∀ t t', (Step t t' → Step (f t) (f t'))) →
+  MultiStep t t' → MultiStep (f t) (f t') := by
+  intro f hf ht
+  induction ht <;> grind [MultiStep]
+
+theorem big_step_is_multi_step : Value v → (BigStep t v ↔ MultiStep t v) := by
+  intro hv
   constructor
-  · sorry
-  · sorry
+  { intro hbs
+    unhygienic induction hbs
+    { grind [MultiStep] }
+    { grind [multi_step_if_eval_true, Value, multi_step_trans] }
+    { grind [multi_step_if_eval_false, Value, multi_step_trans] }
+    { apply aug_multi_step <;> grind [Step, Value] }
+    { apply multi_step_trans
+      { exact aug_multi_step (f := Term.Pred) (by grind [Step]) (a_ih hv)}
+      grind [MultiStep, Step] }
+    { have : MultiStep t_1 v_1.Succ := by grind [Value, NatV]
+      apply multi_step_trans
+      { exact aug_multi_step (f := Term.Pred) (by grind [Step]) this }
+      apply MultiStep.Step
+      { exact Step.PredSucc a }
+      grind [MultiStep, Step] }
+    { have : MultiStep t_1 Term.Zero := by grind [Value, NatV]
+      apply multi_step_trans
+      { exact aug_multi_step (f := Term.IsZero) (by grind [Step]) this }
+      apply MultiStep.Step
+      { exact Step.IsZeroZero }
+      grind [MultiStep, Step] }
+    have : MultiStep t_1 v_1.Succ := by grind [Value, NatV]
+    apply multi_step_trans
+    { exact aug_multi_step (f := Term.IsZero) (by grind [Step]) this }
+    apply MultiStep.Step
+    { exact Step.IsZeroSucc a }
+    grind [MultiStep, Step] }
+  intro hms
+  induction hms <;> grind [big_step_implies_step, BigStep]
 
 end Naturals
 
