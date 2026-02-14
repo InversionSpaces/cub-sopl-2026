@@ -91,5 +91,5 @@
    "inputRev": "v4.27.0",
    "inherited": true,
    "configFile": "lakefile.toml"}],
- "name": "«03-untyped»",
+ "name": "tapl",
  "lakeDir": ".lake"}

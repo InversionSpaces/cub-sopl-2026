@@ -34,6 +34,13 @@
 
 5.3.8 : Big-Step style for λNB
 -/
+import Mathlib.Data.Countable.Basic
+import Mathlib.Data.Finset.Basic
+import Mathlib.Data.Finset.Card
+
+namespace LambdaCalculus
+
+namespace Programming
 
 inductive LTerm
 | Var (x : Nat)
@@ -173,3 +180,36 @@ def my_times :=
       (.App
         (.Var 0)
         (.Var 1)))
+
+end Programming
+
+inductive Term (α : Type) [Countable α] : Type
+| Var (x : α)
+| Abs (x : α) (t : Term α)
+| App (t1 : Term α) (t2 : Term α)
+
+def size [Countable α] : Term α → Nat
+| .Var _ => 1
+| .Abs _ t => 1 + size t
+| .App t1 t2 => 1 + size t1 + size t2
+
+def FV [Countable α] [DecidableEq α] : Term α → Finset α
+| .Var x => { x }
+| .Abs x t => FV t \ {x}
+| .App t1 t2 => FV t1 ∪ FV t2
+
+-- 5.3.3 : |FV t| ≤ size t
+def fv_le_size [Countable α] [DecidableEq α] :
+  ∀ t : Term α, (FV t).card ≤ size t := by
+  intro t
+  induction t
+  all_goals (grind [FV, size])
+
+class Infinite (α : Type) [DecidableEq α] where
+  pick : (s : Finset α) → ∃ x : α, x ∉ s
+
+inductive AlphaEq [Countable α] [DecidableEq α] : Term α → Term α → Prop
+| var : AlphaEq (.Var x) (.Var x)
+| app : AlphaEq t t' → AlphaEq s s' → AlphaEq (.App t s) (.App t' s')
+
+end LambdaCalculus
