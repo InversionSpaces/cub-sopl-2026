@@ -37,6 +37,7 @@
 import Mathlib.Data.Countable.Basic
 import Mathlib.Data.Finset.Basic
 import Mathlib.Data.Finset.Card
+import Mathlib.Logic.Relation
 
 namespace LambdaCalculus
 
@@ -183,17 +184,17 @@ def my_times :=
 
 end Programming
 
-inductive Term (α : Type) [Countable α] : Type
+inductive Term (α : Type) : Type
 | Var (x : α)
 | Abs (x : α) (t : Term α)
 | App (t1 : Term α) (t2 : Term α)
 
-def size [Countable α] : Term α → Nat
+def size : Term α → Nat
 | .Var _ => 1
 | .Abs _ t => 1 + size t
 | .App t1 t2 => 1 + size t1 + size t2
 
-def FV [Countable α] [DecidableEq α] : Term α → Finset α
+def FV [DecidableEq α] : Term α → Finset α
 | .Var x => { x }
 | .Abs x t => FV t \ {x}
 | .App t1 t2 => FV t1 ∪ FV t2
@@ -205,11 +206,76 @@ def fv_le_size [Countable α] [DecidableEq α] :
   induction t
   all_goals (grind [FV, size])
 
-class Infinite (α : Type) [DecidableEq α] where
-  pick : (s : Finset α) → ∃ x : α, x ∉ s
+def rename [DecidableEq α]
+  (t : Term α) (f s : α) : Term α := match t with
+  | Term.Var x => if x = f then .Var s else .Var x
+  | .Abs x t' => if x = f then .Abs x t' else .Abs x (rename t' f s)
+  | .App t1 t2 => .App (rename t1 f s) (rename t2 f s)
 
-inductive AlphaEq [Countable α] [DecidableEq α] : Term α → Term α → Prop
-| var : AlphaEq (.Var x) (.Var x)
-| app : AlphaEq t t' → AlphaEq s s' → AlphaEq (.App t s) (.App t' s')
+lemma rename_size_eq [DecidableEq α] (t : Term α) (f s : α) :
+  size (rename t f s) = size t := by
+  induction t
+  all_goals (grind [rename, size])
+
+class Infinite (α : Type) [DecidableEq α] where
+  pick : (s : Finset α) → α
+  pick_is_fresh : pick s ∉ s
+
+def subst [DecidableEq α] [Infinite α] : Term α → α → Term α → Term α
+| .Var x, f, s => if x = f then s else .Var x
+| .Abs x t, f, s =>
+  if x = f then .Abs x t
+  else if x ∈ FV s then
+    let y := Infinite.pick (FV t ∪ FV s ∪ {f})
+    .Abs y (subst (rename t x y) f s)
+  else .Abs x (subst t f s)
+| .App t1 t2, f, s => .App (subst t1 f s) (subst t2 f s)
+termination_by t => size t
+decreasing_by
+  · rw [rename_size_eq]
+    grind [size]
+  all_goals (grind [size])
+
+inductive AlphaRename [DecidableEq α] : Term α → Term α → Prop
+| rename : y ∉ FV t → AlphaRename (.Abs x t) (.Abs y (rename t x y))
+
+inductive CompatClosure (R : Term α → Term α → Prop) : Term α → Term α → Prop
+| rel : R t t' → CompatClosure R t t'
+| abs : CompatClosure R t t' → CompatClosure R (.Abs x t) (.Abs x t')
+| appL : CompatClosure R t t' → CompatClosure R (.App t s) (.App t' s)
+| appR : CompatClosure R s s' → CompatClosure R (.App t s) (.App t s')
+
+def AlphaEq [DecidableEq α] : Term α → Term α → Prop :=
+  Relation.EqvGen (CompatClosure AlphaRename)
+
+infix:50 " ~a " => AlphaEq
+
+def a_term_setoid [DecidableEq α] : Setoid (Term α)  :=
+  Relation.EqvGen.setoid AlphaEq
+
+def ATerm (α : Type) [DecidableEq α] := Quotient (@a_term_setoid α _)
+
+lemma subst_respects_alpha [DecidableEq α] [Infinite α]
+  {t t' : Term α} {f : α} {s : Term α} :
+  t ~a t' → (subst t f s) ~a (subst t' f s) := by
+  intro ha
+  induction ha
+  · rename_i h
+    cases h
+    · sorry
+    · sorry
+    · sorry
+    · sorry
+  · apply Relation.EqvGen.refl
+  · apply Relation.EqvGen.symm
+    assumption
+  · apply Relation.EqvGen.trans
+    repeat assumption
+
+def substA [DecidableEq α] [Infinite α]
+  (t : ATerm α) (f : α) (s : Term α) : ATerm α :=
+  Quotient.liftOn t
+    (fun p => Quotient.mk a_term_setoid (subst p f s))
+    (fun a b hav => sorry)
 
 end LambdaCalculus
