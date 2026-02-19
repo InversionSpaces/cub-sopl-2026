@@ -335,8 +335,7 @@ lemma subst_correspondance [DecidableEq α] [Infinite α]
     split_ifs
     · contradiction
     · sorry
-    ·
-      sorry
+    · sorry
 
 -- lemma alpha_var_iff [DecidableEq α] {t t' : Term α}
 --   (h : t ~a t') : t = .Var y ↔ t' = .Var y := by
@@ -465,10 +464,7 @@ lemma subst_respects_alpha [DecidableEq α] [Infinite α]
     · exact .abs h
     · rename_i hxf
       split
-      · rename_i hxs
-        have hfv := alpha_fv h
-        rw [hfv]
-        exact .abs sorry
+      · sorry
       · exact .abs ih
   | rename hfv =>
 
