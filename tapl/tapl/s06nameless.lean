@@ -70,6 +70,169 @@ def subst (j : ℕ) (s : BLTerm) : BLTerm → BLTerm
 | .Abs t => .Abs (subst (j + 1) (shift_up s) t)
 | .App t1 t2 => .App (subst j s t1) (subst j s t2)
 
+def beta_red (k : ℕ) (t s : BLTerm) := shift_down_from k (subst k (shift_up_from k s) t)
+
+inductive Step : BLTerm → BLTerm → Prop
+| refl : Step t t
+| abs : Step t t' → Step (.Abs t) (.Abs t')
+| app : Step t t' → Step s s' → Step (.App t s) (.App t' s')
+| beta : Step t t' → Step s s' → Step (.App (.Abs t) s) (beta_red 0 t' s')
+
+theorem shift_up_down (t : BLTerm) :
+  shift_down_from x (shift_up_from x t) = t := by
+    unhygienic induction t generalizing x
+    { rw [shift_up_from]
+      split_ifs with h
+      { rw [shift_down_from, if_pos h] }
+      rw [shift_down_from, if_neg]
+      { rfl }
+      omega }
+    { rw [shift_up_from, shift_down_from]
+      grind }
+    rw [shift_up_from, shift_down_from]
+    grind
+
+lemma beta_dist (t1 t2 s : BLTerm) :
+  beta_red k (t1.App t2) s = (beta_red k t1 s).App (beta_red k t2 s) := by
+    rw [beta_red, beta_red, subst, shift_down_from]
+    rfl
+
+--probably correct and needs a generalization
+lemma beta_some_lemma (t s : BLTerm) :
+  n = 0 → (beta_red n (shift_up_from (k + 1) t) (shift_up_from k s)) =
+  shift_up_from k (beta_red n t s) := by
+    unhygienic induction t generalizing n k
+    { repeat rw [beta_red]
+      grind [Nat.pred_eq_sub_one, shift_down_from, shift_up_from, shift_up_down, subst] }
+    { simp [beta_red, subst, shift_down_from, shift_up_from]
+      intro heq
+      have := t_ih (n := n + 1) (k := k + 1) sorry
+      simp [beta_red] at this
+      sorry }
+    rw [beta_dist, shift_up_from, shift_up_from, beta_dist]
+    grind
+
+lemma beta_shift (t t' : BLTerm) :
+  Step t t' → Step (shift_up_from k t) (shift_up_from k t') := by
+    intro ht
+    unhygienic induction ht generalizing k
+    { apply Step.refl }
+    { repeat rw [shift_up_from]
+      apply Step.abs
+      grind }
+    { repeat rw [shift_up_from]
+      apply Step.app <;> grind }
+    repeat rw [shift_up_from]
+    have h1 := a_ih (k := k + 1)
+    have h2 := a_ih_1 (k := k)
+    have := Step.beta h1 h2
+    rw [beta_some_lemma] at this
+    { apply this }
+    omega
+
+-- should be correct
+theorem step_beta (s t s' t' : BLTerm) :
+  Step s s' → Step t t' → Step (beta_red 0 t s) (beta_red 0 t' s') := by
+    intro hs ht
+    unhygienic induction t generalizing t' s s'
+    { cases ht
+      rw [beta_red, subst, beta_red, subst]
+      split_ifs with h
+      { rw [shift_up_down, shift_up_down]
+        exact hs }
+      apply Step.refl }
+    { --simp only [beta_red, subst, zero_add, shift_down_from]
+      unhygienic cases ht
+      { apply Step.abs
+        sorry }
+      apply Step.abs
+      sorry }
+    unhygienic cases ht
+    { rw [beta_dist, beta_dist]
+      apply Step.app
+      { apply t1_ih s s' t1 hs (by grind [Step]) }
+      apply t2_ih s s' t2 hs (by grind [Step]) }
+    { rw [beta_dist, beta_dist]
+      apply Step.app
+      { apply t1_ih s s' t'_1 hs a }
+      apply t2_ih s s' s'_1 hs a_1 }
+    rw [beta_dist]
+    sorry
+
+theorem step_inj (s t1 t2 : BLTerm) :
+  Step s t1 → Step s t2 → ∃ r, Step t1 r ∧ Step t2 r := by
+    unhygienic induction s generalizing t1 t2
+    { grind [Step] }
+    { intro h1 h2
+      unhygienic cases h1
+      { exists t2
+        grind [Step] }
+      unhygienic cases h2
+      { exists t'.Abs
+        grind [Step] }
+      rcases t_ih t' t'_1 a a_1 with ⟨r, hr⟩
+      exists .Abs r
+      grind [Step] }
+    intro h1 h2
+    unhygienic cases h1 <;> unhygienic cases h2
+    { exists t1.App t2
+      grind [Step] }
+    { exists t'.App s'
+      grind [Step] }
+    { exists beta_red 0 t' s'
+      grind [Step] }
+    { exists t'.App s'
+      grind [Step] }
+    { rcases t1_ih t' t'_1 a a_2 with ⟨t2, ht2⟩
+      rcases t2_ih s' s'_1 a_1 a_3 with ⟨s2, hs2⟩
+      exists t2.App s2
+      grind [Step] }
+    { rcases t2_ih s' s'_1 a_1 a_3 with ⟨s2, hs2⟩
+      unhygienic cases a
+      { exists beta_red 0 t'_1 s2
+        constructor
+        { apply Step.beta a_2 hs2.1 }
+        apply step_beta _ _ _ _ hs2.2
+        apply Step.refl }
+      rcases t1_ih t'_1.Abs t'_2.Abs (by grind [Step]) (by grind [Step]) with ⟨t2, ht2⟩
+      unhygienic cases t2
+      { grind [Step] }
+      { exists beta_red 0 t_1 s2
+        constructor
+        { apply Step.beta (by grind [Step]) hs2.1 }
+        apply step_beta _ _ _ _ hs2.2
+        grind [Step] }
+      grind [Step] }
+    { exists beta_red 0 t' s'
+      grind [Step] }
+    { rcases t2_ih s' s'_1 a_1 a_3 with ⟨s2, hs2⟩
+      unhygienic cases a_2
+      { exists beta_red 0 t' s2
+        constructor
+        { apply step_beta _ _ _ _ hs2.1
+          apply Step.refl    }
+        apply Step.beta a hs2.2 }
+      rcases t1_ih t'.Abs t'_2.Abs (by grind [Step]) (by grind [Step]) with ⟨t2, ht2⟩
+      unhygienic cases t2
+      { grind [Step] }
+      { exists beta_red 0 t_1 s2
+        constructor
+        { apply step_beta _ _ _ _ hs2.1
+          grind [Step] }
+        apply Step.beta (by grind [Step]) hs2.2 }
+      grind [Step] }
+    rcases t1_ih t'.Abs t'_1.Abs (by grind [Step]) (by grind [Step]) with ⟨r1, hr1⟩
+    rcases t2_ih _ _ a_1 a_3 with ⟨r2, hr2⟩
+    unhygienic cases r1
+    { grind [Step] }
+    { exists beta_red 0 t_1 r2
+      constructor
+      { apply step_beta _ _ _ _ hr2.1
+        grind [Step] }
+      apply step_beta _ _ _ _ hr2.2
+      grind [Step] }
+    grind [Step]
+
 end Semantics
 
 end Nameless
