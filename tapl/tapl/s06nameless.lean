@@ -29,7 +29,7 @@ def remove_names (ctx : NameCtx) (t : STerm) : BLTerm :=
 
 lemma remove_names_fv {ctx : NameCtx} {t : STerm}
   (h : ∀ s ∈ FV t, ctx.contains s) :
-  (remove_names ctx t).FVn ctx.length  := by
+  (remove_names ctx t).FVn ctx.length := by
   induction t generalizing ctx
   · constructor
     simp only [FV, Finset.mem_singleton] at h
@@ -65,10 +65,94 @@ def shift_down_from (c : ℕ) : BLTerm → BLTerm
 
 def shift_down (s : BLTerm) : BLTerm := shift_down_from 0 s
 
-def subst (j : ℕ) (s : BLTerm) : BLTerm → BLTerm
+def substN (j : ℕ) (s : BLTerm) : BLTerm → BLTerm
 | .Var x => if x = j then s else .Var x
-| .Abs t => .Abs (subst (j + 1) (shift_up s) t)
-| .App t1 t2 => .App (subst j s t1) (subst j s t2)
+| .Abs t => .Abs (substN (j + 1) (shift_up s) t)
+| .App t1 t2 => .App (substN j s t1) (substN j s t2)
+
+def subst (s t : BLTerm) : BLTerm := substN 0 s t
+
+namespace CallByName
+
+inductive Value : BLTerm → Prop
+| var : Value (.Var x)
+| abs : Value (.Abs t)
+
+inductive SmallStep : BLTerm → BLTerm → Prop
+| appL : SmallStep t1 t1' → SmallStep (.App t1 t2) (.App t1' t2)
+| beta : SmallStep (.App (.Abs t1) t2) (subst t2 t1)
+
+def MultiStep : BLTerm → BLTerm → Prop := Relation.ReflTransGen SmallStep
+
+theorem determinism
+  (h1 : SmallStep t t1)
+  (h2 : SmallStep t t2) : t1 = t2 := by
+  induction t generalizing t1 t2
+  · contradiction
+  · contradiction
+  · cases h1 <;> cases h2
+    · grind
+    · contradiction
+    · contradiction
+    · grind
+
+end CallByName
+
+namespace CallByValue
+
+inductive Value : BLTerm → Prop
+| var : Value (.Var x)
+| abs : Value (.Abs t)
+
+inductive SmallStep : BLTerm → BLTerm → Prop
+| appL : SmallStep t1 t1' → SmallStep (.App t1 t2) (.App t1' t2)
+| appR : Value t1 → SmallStep t2 t2' → SmallStep (.App t1 t2) (.App t1 t2')
+| beta : Value t2 → SmallStep (.App (.Abs t1) t2) (subst t2 t1)
+
+def MultiStep : BLTerm → BLTerm → Prop := Relation.ReflTransGen SmallStep
+
+end CallByValue
+
+infix:50 " ~cbn~> " => CallByName.MultiStep
+infix:50 " ~cbv~> " => CallByValue.MultiStep
+
+abbrev CBNameV := CallByName.Value
+abbrev CBValueV := CallByValue.Value
+
+def CBNameNormalizable (t : BLTerm) : Prop := ∃ t', t ~cbn~> t' ∧ CBNameV t'
+def CBValueNormalizable (t : BLTerm) : Prop := ∃ t', t ~cbv~> t' ∧ CBValueV t'
+
+lemma value_form_subst_value (s t : BLTerm) :
+  CBValueV (subst s t) → CBValueV t := by
+  intro h
+  cases t
+  · simp only [subst, substN] at h
+    split_ifs at h
+    repeat constructor
+  · simp only [subst, substN] at h
+    constructor
+  · contradiction
+
+lemma cbv_norm_app (h : CBValueNormalizable (t1.App t2)) :
+  CBValueNormalizable t1 ∧ CBValueNormalizable t2 := by
+  obtain ⟨v, hstep, hval⟩ := h
+  generalize heq : (t1.App t2) = t at hstep
+  induction hstep
+    using Relation.ReflTransGen.head_induction_on
+  · sorry
+  · sorry
+
+theorem cbv_implies_cbn (h : CBValueNormalizable t) : CBNameNormalizable t := by
+  induction t
+  · repeat constructor
+  · rename_i body _
+    use body.Abs
+    repeat constructor
+  · rename_i tl tr ihl ihr
+    have ⟨ n , hcb, hcbv ⟩ := h
+    cases hcb
+    · contradiction
+    · sorry
 
 def beta_red (k : ℕ) (t s : BLTerm) := shift_down_from k (subst k (shift_up_from k s) t)
 
