@@ -135,12 +135,22 @@ lemma value_form_subst_value (s t : BLTerm) :
 
 lemma cbv_norm_app (h : CBValueNormalizable (t1.App t2)) :
   CBValueNormalizable t1 ∧ CBValueNormalizable t2 := by
-  obtain ⟨v, hstep, hval⟩ := h
-  generalize heq : (t1.App t2) = t at hstep
-  induction hstep
-    using Relation.ReflTransGen.head_induction_on
-  · sorry
-  · sorry
+  obtain ⟨t', hstep, hval⟩ := h
+  cases hstep
+  · contradiction
+  · rename_i mt steps step
+    generalize heq : t1.App t2 = t at steps
+    induction steps
+      using Relation.ReflTransGen.head_induction_on
+      generalizing t1 t2
+    · sorry
+    · rename_i step steps ih
+      rw [← heq] at step
+      cases step
+      · sorry
+      · sorry
+      · sorry
+
 
 theorem cbv_implies_cbn (h : CBValueNormalizable t) : CBNameNormalizable t := by
   induction t
