@@ -78,9 +78,80 @@ inductive Value : BLTerm → Prop
 | var : Value (.Var x)
 | abs : Value (.Abs t)
 
+def bred (s t : BLTerm) : BLTerm :=
+  shift_down (subst (shift_up s) t)
+
 inductive SmallStep : BLTerm → BLTerm → Prop
 | appL : SmallStep t1 t1' → SmallStep (.App t1 t2) (.App t1' t2)
-| beta : SmallStep (.App (.Abs t1) t2) (subst t2 t1)
+| beta : SmallStep (.App (.Abs t1) t2) (bred t2 t1)
+
+lemma shift_up_from_fv (t : BLTerm) (h : t.FVn n) :
+  (shift_up_from m t).FVn (n + 1) := by
+  induction t generalizing n m <;> cases h
+  · simp only [shift_up_from]
+    split_ifs with h
+    all_goals (grind [BLTerm.FVn.var])
+  · rename_i ih b
+    apply BLTerm.FVn.abs
+    apply ih
+    assumption
+  · rename_i ih1 ih2 fv1 fv2
+    apply BLTerm.FVn.app
+    · grind
+    · grind
+
+lemma shift_up_fv (t : BLTerm) (h : t.FVn n) : (shift_up t).FVn (n + 1) :=
+  shift_up_from_fv t h
+
+lemma shifts_from_cancel : shift_down_from m (shift_up_from m t) = t := by
+  induction t generalizing m
+  · simp only [shift_up_from]
+    split_ifs with h
+    · grind [shift_down_from]
+    · simp only [shift_down_from]
+      rw [if_neg (by grind)]
+      rfl
+  · simp only [shift_up_from, shift_down_from]
+    grind
+  · simp only [shift_up_from, shift_down_from]
+    grind
+
+lemma shifts_cancel : shift_down (shift_up t) = t := by
+  apply shifts_from_cancel
+
+lemma bred_preserves_fv (t s : BLTerm)
+  (fvt : t.FVn (n + 1)) (fvs : s.FVn n) : (bred s t).FVn n := by
+  induction t <;> cases fvt
+  · simp only [bred, subst, substN]
+    split_ifs with h
+    · rw [shifts_cancel]
+      assumption
+    · simp only [shift_down, shift_down_from]
+      rw [if_neg (by grind)]
+      apply BLTerm.FVn.var
+      grind [Nat.pred_eq_sub_one]
+  ·
+    sorry
+  · sorry
+
+lemma step_preserves_fv (h : SmallStep t t') :
+  ∀ n, t.FVn n → t'.FVn n := by
+  induction t generalizing t' <;> cases h
+  · rename_i t1ih t2ih t1' step
+    intro n hfv
+    cases hfv
+    constructor
+    · apply t1ih
+      · assumption
+      · assumption
+    · assumption
+  · rename_i t2 t2ih t1 t1ih
+    intro n hfv
+    cases hfv
+    rename_i hfvt1a _
+    cases hfvt1a
+
+    sorry
 
 def MultiStep : BLTerm → BLTerm → Prop := Relation.ReflTransGen SmallStep
 
@@ -96,6 +167,70 @@ theorem determinism
     · contradiction
     · grind
 
+mutual
+inductive EvalCtxN : Nat → Type where
+| mk (ctx : Fin n → Σ m : Nat, CloN m) : EvalCtxN n
+
+inductive ValCloN : Nat → Type where
+| mk (p : BLTerm) (hv : Value p) (fvh : p.FVn n)
+      (ctx : EvalCtxN n) : ValCloN n
+
+inductive CloN : Nat → Type where
+| mk (p : BLTerm) (fvh : p.FVn n) (ctx : EvalCtxN n) : CloN n
+end
+
+abbrev ValClo := Σ n: Nat, ValCloN n
+abbrev Clo := Σ n: Nat, CloN n
+abbrev EvalCtx := Σ n: Nat, EvalCtxN n
+
+abbrev EvalCtx.n : EvalCtx → Nat
+| ⟨n, _⟩ => n
+
+abbrev EvalCtxN.get (ctx : EvalCtxN n) (i : Fin n) : Clo :=
+  match ctx with
+  | EvalCtxN.mk fn => fn i
+
+abbrev EvalCtx.get (ctx : EvalCtx) (i : Fin ctx.n) : Clo :=
+  match ctx with
+  | ⟨_, EvalCtxN.mk fn⟩ => fn i
+
+def ctx_of (fn : Fin n → Clo) : EvalCtxN n :=
+  .mk (fun i => fn i)
+
+def EvalCtxN.subst (ctx : EvalCtxN n) (s : Clo) : EvalCtxN (n.succ) :=
+  ctx_of (fun i => match i with
+    | ⟨ 0, _⟩ => s
+    | ⟨ i + 1, h⟩ => ctx.get ⟨i, by grind⟩
+  )
+
+inductive Eval : Clo → ValClo → Prop where
+| var {ctx : EvalCtxN n} :
+  Eval (ctx.get x) v →
+  Eval ⟨ n, .mk (.Var x.val) (by grind [BLTerm.FVn.var]) ctx ⟩ v
+| lam :
+  Eval ⟨n, .mk (.Abs t) f (.mk c)⟩
+       ⟨n, .mk (.Abs t) Value.abs f (.mk c)⟩
+| app :
+  Eval ⟨ n1, .mk e1 p c⟩ ⟨ n, .mk (.Abs e) q r c'⟩ →
+  Eval ⟨ n + 1, .mk e u (c'.subst v) ⟩ v' →
+  Eval ⟨ n1, .mk (.App e1 e2) w c⟩ v'
+
+lemma steps_impl_eval
+  (steps : MultiStep t v) (hfv : t.FVn n) (hval : Value v) :
+  ∀ ctx : EvalCtxN n, ∃ rctx : EvalCtxN m,
+  Eval ⟨ n, .mk t hfv ctx ⟩ ⟨ n, .mk v hval hfvv ctx ⟩ := by
+  induction steps
+  · intro ctx
+    cases hval
+    · rename_i x
+      use ctx_of (fun i => by sorry)
+      apply Eval.var
+
+      sorry
+    · sorry
+  · sorry
+
+
 end CallByName
 
 namespace CallByValue
@@ -110,6 +245,59 @@ inductive SmallStep : BLTerm → BLTerm → Prop
 | beta : Value t2 → SmallStep (.App (.Abs t1) t2) (subst t2 t1)
 
 def MultiStep : BLTerm → BLTerm → Prop := Relation.ReflTransGen SmallStep
+
+namespace Simulation
+
+mutual
+inductive EvalCtxN : Nat → Type where
+| mk (ctx : Fin n → Σ m : Nat, ValCloN m) : EvalCtxN n
+
+inductive ValCloN : Nat → Type where
+| mk (p : BLTerm) (hv : Value p) (fvh : p.FVn n)
+      (ctx : EvalCtxN n) : ValCloN n
+
+inductive CloN : Nat → Type where
+| mk (p : BLTerm) (fvh : p.FVn n) (ctx : EvalCtxN n) : CloN n
+end
+
+abbrev ValClo := Σ n: Nat, ValCloN n
+abbrev Clo := Σ n: Nat, CloN n
+abbrev EvalCtx := Σ n: Nat, EvalCtxN n
+
+abbrev EvalCtx.n : EvalCtx → Nat
+| ⟨n, _⟩ => n
+
+abbrev EvalCtxN.get (ctx : EvalCtxN n) (i : Fin n) : ValClo :=
+  match ctx with
+  | EvalCtxN.mk fn => fn i
+
+abbrev EvalCtx.get (ctx : EvalCtx) (i : Fin ctx.n) : ValClo :=
+  match ctx with
+  | ⟨_, EvalCtxN.mk fn⟩ => fn i
+
+def ctx_of (fn : Fin n → ValClo) : EvalCtxN n :=
+  .mk (fun i => fn i)
+
+def EvalCtxN.subst (ctx : EvalCtxN n) (s : ValClo) : EvalCtxN (n.succ) :=
+  ctx_of (fun i => match i with
+    | ⟨ 0, _⟩ => s
+    | ⟨ i + 1, h⟩ => ctx.get ⟨i, by grind⟩
+  )
+
+inductive Eval : Clo → ValClo → Prop where
+| var :
+  Eval ⟨n, .mk (.Var k) (BLTerm.FVn.var h) (.mk c) ⟩
+       (c (Fin.mk k h))
+| lam :
+  Eval ⟨n, .mk (.Abs t) f (.mk c)⟩
+       ⟨n, .mk (.Abs t) Value.abs f (.mk c)⟩
+| app :
+  Eval ⟨ n1, .mk e1 p c⟩ ⟨ n, .mk (.Abs e) q r c'⟩ →
+  Eval ⟨ n1, .mk e2 s c⟩ v →
+  Eval ⟨ n + 1, .mk e u (c'.subst v) ⟩ v' →
+  Eval ⟨ n1, .mk (.App e1 e2) w c⟩ v'
+
+end Simulation
 
 end CallByValue
 
@@ -175,17 +363,15 @@ lemma cbv_norm_app (h : CBValueNormalizable (t1.App t2)) :
         repeat constructor
         assumption
 
-theorem cbv_implies_cbn (h : CBValueNormalizable t) : CBNameNormalizable t := by
-  induction t
-  · repeat constructor
-  · rename_i body _
-    use body.Abs
+lemma cbn_cbv_value_eq : CBNameV t ↔ CBValueV t := by
+  constructor
+  · intro hv
+    cases hv
     repeat constructor
-  · rename_i tl tr ihl ihr
-    have ⟨ n , hcb, hcbv ⟩ := h
-    cases hcb
-    · contradiction
-    · sorry
+  · intro hv
+    cases hv
+    repeat constructor
+
 
 def shift_up_from_iter (k : Nat) (s : BLTerm) :=
   match k with
