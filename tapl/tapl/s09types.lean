@@ -1,7 +1,7 @@
 import Mathlib.Tactic.Basic
 
 inductive type
-| res (tp : Nat)
+| base
 | arr (tp : type) (ct : type)
 
 inductive Term
@@ -21,7 +21,6 @@ inductive Typ : List type → Term → type → Prop
   Typ Γ t₁ (tp₁.arr tp₂) →
   Typ Γ t₂ tp₁ →
   Typ Γ (.App t₁ t₂) tp₂
-
 
 def shift_up_from (c : Nat) : Term → Term
 | .Var x => if x < c then .Var x else .Var (x + 1)
@@ -90,3 +89,50 @@ lemma weakening (t : Term) (tp : type) (Γ Γ₁ : List type) :
   Typ Γ t tp → Typ (Γ ++ Γ₁) t tp := by
     intro ht
     induction ht <;> grind [Typ]
+
+mutual
+inductive NHead : Term → Prop where
+| var {n} : NHead (.Var n)
+| app {t s} : NHead t → NF s → NHead (.App t s)
+
+inductive NF : Term → Prop where
+| abs {t tp} : NF t → NF (t.Abs tp)
+| ne  {t} : NHead t → NF t
+end
+
+theorem progress (t : Term) (td : Typ Γ t T) :
+  NF t ∨ ∃ t', Step t t' := by
+  induction td
+  · grind [NF, NHead]
+  · rename_i ih
+    cases ih
+    · grind [NF, NHead]
+    · rename_i tp _ _ h
+      have ⟨ t', _ ⟩ := h
+      right
+      exists t'.Abs tp
+      grind [Step]
+  · rename_i ih1 ih2
+    cases ih1 <;> cases ih2
+    · rename_i h1 h2
+      cases h1
+      · rename_i t₂ _ _ _ _ t' tp _ _
+        right
+        exists (betar 0 t' t₂)
+        grind [Step]
+      · grind [NF, NHead]
+    · rename_i t₁ t₂ _ _ _ _ _ _ h
+      have ⟨ t', _ ⟩ := h
+      right
+      exists t₁.App t'
+      grind [Step]
+    · rename_i t₁ t₂ _ _ _ _ _ h _
+      have ⟨ t', _ ⟩ := h
+      right
+      exists t'.App t₂
+      grind [Step]
+    · rename_i t₁ t₂ _ _ _ _ _ h _
+      have ⟨ t', _ ⟩ := h
+      right
+      exists t'.App t₂
+      grind [Step]

@@ -215,20 +215,20 @@ inductive Eval : Clo → ValClo → Prop where
   Eval ⟨ n + 1, .mk e u (c'.subst v) ⟩ v' →
   Eval ⟨ n1, .mk (.App e1 e2) w c⟩ v'
 
-lemma steps_impl_eval
-  (steps : MultiStep t v) (hfv : t.FVn n) (hval : Value v) :
-  ∀ ctx : EvalCtxN n, ∃ rctx : EvalCtxN m,
-  Eval ⟨ n, .mk t hfv ctx ⟩ ⟨ n, .mk v hval hfvv ctx ⟩ := by
-  induction steps
-  · intro ctx
-    cases hval
-    · rename_i x
-      use ctx_of (fun i => by sorry)
-      apply Eval.var
+-- lemma steps_impl_eval
+--   (steps : MultiStep t v) (hfv : t.FVn n) (hval : Value v) :
+--   ∀ ctx : EvalCtxN n, ∃ rctx : EvalCtxN m,
+--   Eval ⟨ n, .mk t hfv ctx ⟩ ⟨ n, .mk v hval hfvv ctx ⟩ := by
+--   induction steps
+--   · intro ctx
+--     cases hval
+--     · rename_i x
+--       use ctx_of (fun i => by sorry)
+--       apply Eval.var
 
-      sorry
-    · sorry
-  · sorry
+--       sorry
+--     · sorry
+--   · sorry
 
 
 end CallByName
