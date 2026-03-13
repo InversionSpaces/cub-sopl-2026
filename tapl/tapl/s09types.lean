@@ -1,10 +1,13 @@
 import Mathlib.Tactic.Basic
 
 inductive type
-| base
+| boolean
 | arr (tp : type) (ct : type)
 
 inductive Term
+| trueT : Term
+| falseT : Term
+| ite (ct : Term) (t₁ : Term) (t₂ : Term) : Term
 | Var (x : Nat)
 | Abs (t : Term) (tp : type)
 | App (t₁ : Term) (t₂ : Term)
@@ -15,6 +18,8 @@ abbrev TCtx := List type
 def TCtx.types (Γ : TCtx) (x : Nat) (tp : type) : Prop := Γ[x]? = tp
 
 inductive Typ : TCtx → Term → type → Prop
+| Ttrue : Typ Γ .trueT type.boolean
+| Tfalse : Typ Γ .falseT type.boolean
 | TVar (x : Nat) (Γ : TCtx) (tp : type) :
   Γ.types x tp →
   Typ Γ (.Var x) tp
@@ -25,11 +30,19 @@ inductive Typ : TCtx → Term → type → Prop
   Typ Γ t₁ (tp₁.arr tp₂) →
   Typ Γ t₂ tp₁ →
   Typ Γ (.App t₁ t₂) tp₂
+| Tite (ct : Term) (t₁ t₂ : Term) (Γ : TCtx) (tp : type) :
+  Typ Γ ct type.boolean →
+  Typ Γ t₁ tp →
+  Typ Γ t₂ tp →
+  Typ Γ (.ite ct t₁ t₂) tp
 
 def shift_up_from (c : Nat) : Term → Term
 | .Var x => if x < c then .Var x else .Var (x + 1)
 | .Abs t tp => .Abs (shift_up_from (c + 1) t) tp
 | .App t1 t2 => .App (shift_up_from c t1) (shift_up_from c t2)
+| .trueT => .trueT
+| .falseT => .falseT
+| .ite ct t1 t2 => .ite (shift_up_from c ct) (shift_up_from c t1) (shift_up_from c t2)
 
 def shift_up (s : Term) : Term := shift_up_from 0 s
 
@@ -43,6 +56,9 @@ def betar (k : Nat) (t s : Term) : Term :=
   | .Var x => if x = k then s else if x < k then .Var x else .Var (x - 1)
   | .Abs t1 tp => (betar (k + 1) t1 (shift_up s)).Abs tp
   | .App t1 t2 => (betar k t1 s).App (betar k t2 s)
+  | .trueT => .trueT
+  | .falseT => .falseT
+  | .ite ct t1 t2 => .ite (betar k ct s) (betar k t1 s) (betar k t2 s)
 
 abbrev subst (t s : Term) : Term := betar 0 t s
 
@@ -58,6 +74,19 @@ inductive Step : Term → Term → Prop
   Step (t.App s) (t.App s')
 | Beta (t s : Term) (tp : type) :
   Step ((t.Abs tp).App s) (subst t s)
+| IteTrue (t1 t2 : Term) :
+  Step (.ite .trueT t1 t2) t1
+| IteFalse (t1 t2 : Term) :
+  Step (.ite .falseT t1 t2) t2
+| IteCond (ct ct' t1 t2 : Term) :
+  Step ct ct' →
+  Step (.ite ct t1 t2) (.ite ct' t1 t2)
+| IteThen (ct t1 t1' t2 : Term) :
+  Step t1 t1' →
+  Step (.ite ct t1 t2) (.ite ct t1' t2)
+| IteElse (ct t2 t2' t1 : Term) :
+  Step t2 t2' →
+  Step (.ite ct t1 t2) (.ite ct t1 t2')
 
 lemma beta_typ (tp : type) (S : type) :
   Typ (Γ₁ ++ Γ) s S → Typ (Γ₁ ++ tp :: Γ) (shift_up_from Γ₁.length s) S := by
@@ -68,6 +97,9 @@ lemma betar_preservation (t s : Term) (S T : type) (Γ Γ₁ : TCtx) :
   Typ (Γ₁ ++ Γ) s S → Typ (Γ₁ ++ S :: Γ) t T → Typ (Γ₁ ++ Γ) (betar Γ₁.length t s) T := by
     intro hs ht
     unhygienic induction t generalizing Γ Γ₁ s S T
+    { grind [betar, Typ] }
+    { grind [betar, Typ] }
+    { grind [betar, Typ] }
     { rw [betar]
       unhygienic cases ht
       grind [Typ] }
@@ -99,16 +131,21 @@ lemma weakening (t : Term) (tp : type) (Γ Γ₁ : TCtx) :
 mutual
 inductive NHead : Term → Prop where
 | var {n} : NHead (.Var n)
+| ite {ct t e} : NHead ct → NF t → NF e → NHead (.ite ct t e)
 | app {t s} : NHead t → NF s → NHead (.App t s)
 
 inductive NF : Term → Prop where
 | abs {t tp} : NF t → NF (t.Abs tp)
-| ne  {t} : NHead t → NF t
+| trueNF : NF .trueT
+| falseNF : NF .falseT
+| nhead  {t} : NHead t → NF t
 end
 
 theorem progress (t : Term) (td : Typ Γ t T) :
   NF t ∨ ∃ t', Step t t' := by
   induction td
+  · grind [NF]
+  · grind [NF]
   · grind [NF, NHead]
   · rename_i ih
     cases ih
@@ -119,7 +156,6 @@ theorem progress (t : Term) (td : Typ Γ t T) :
       exists t'.Abs tp
       grind [Step]
   · rename_i ih1 ih2
-    -- Actually no need to do all 4 cases
     cases ih1 <;> cases ih2
     · rename_i h1 h2
       cases h1
@@ -127,6 +163,8 @@ theorem progress (t : Term) (td : Typ Γ t T) :
         right
         exists (subst t' t₂)
         grind [Step]
+      · sorry
+      · sorry
       · grind [NF, NHead]
     · rename_i t₁ t₂ _ _ _ _ _ _ h
       have ⟨ t', _ ⟩ := h
@@ -143,3 +181,4 @@ theorem progress (t : Term) (td : Typ Γ t T) :
       right
       exists t'.App t₂
       grind [Step]
+  · sorry
