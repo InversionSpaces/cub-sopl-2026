@@ -30,11 +30,6 @@ def shift_up_from (c : Nat) : Term → Term
 
 def shift_up (s : Term) : Term := shift_up_from 0 s
 
-def subst (j : Nat) (s : Term) : Term → Term
-| .Var x => if x = j then s else .Var x
-| .Abs t tp => .Abs (subst j (shift_up s) t) tp
-| .App t1 t2 => .App (subst j s t1) (subst j s t2)
-
 lemma TypDet (t : Term) (tp₁ tp₂ : type) (Γ : List type) :
   Typ Γ t tp₁ → Typ Γ t tp₂ → tp₁ = tp₂ := by
     intro h1 h2
@@ -79,15 +74,7 @@ lemma betar_preservation (t s : Term) (S T : type) (Γ Γ₁ : List type) :
         grind [shift_up] }
       grind }
     rw [betar]
-    unhygienic cases ht
-    have l1 := t₁_ih s (tp₁.arr S) T Γ
-    apply Typ.TApp
-    { apply t₁_ih
-      { apply hs }
-      apply a }
-    apply t₂_ih
-    { apply hs }
-    apply a_1
+    grind [Typ]
 
 theorem preservation (t t' : Term) (tp : type) (Γ : List type) :
   Step t t' → Typ Γ t tp → Typ Γ t' tp := by
@@ -98,3 +85,8 @@ theorem preservation (t t' : Term) (tp : type) (Γ : List type) :
     rename_i tp1
     have lm := betar_preservation t_1 s tp1 tp Γ []
     grind
+
+lemma weakening (t : Term) (tp : type) (Γ Γ₁ : List type) :
+  Typ Γ t tp → Typ (Γ ++ Γ₁) t tp := by
+    intro ht
+    induction ht <;> grind [Typ]
