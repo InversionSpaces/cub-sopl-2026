@@ -12,6 +12,11 @@ inductive Term
 | Abs (t : Term) (tp : type)
 | App (t₁ : Term) (t₂ : Term)
 
+inductive Value : Term → Prop
+| Abs (t : Term) (tp : type) : Value (t.Abs tp)
+| trueV : Value .trueT
+| falseV : Value .falseT
+
 abbrev TCtx := List type
 
 @[simp, grind]
@@ -63,16 +68,15 @@ def betar (k : Nat) (t s : Term) : Term :=
 abbrev subst (t s : Term) : Term := betar 0 t s
 
 inductive Step : Term → Term → Prop
-| Abs (t t' : Term) (tp : type) :
-  Step t t' →
-  Step (t.Abs tp) (t'.Abs tp)
 | AppL (t t' s : Term) :
   Step t t' →
   Step (t.App s) (t'.App s)
 | AppR (t s' s : Term) :
+  Value t →
   Step s s' →
   Step (t.App s) (t.App s')
 | Beta (t s : Term) (tp : type) :
+  Value s →
   Step ((t.Abs tp).App s) (subst t s)
 | IteTrue (t1 t2 : Term) :
   Step (.ite .trueT t1 t2) t1
@@ -81,12 +85,6 @@ inductive Step : Term → Term → Prop
 | IteCond (ct ct' t1 t2 : Term) :
   Step ct ct' →
   Step (.ite ct t1 t2) (.ite ct' t1 t2)
-| IteThen (ct t1 t1' t2 : Term) :
-  Step t1 t1' →
-  Step (.ite ct t1 t2) (.ite ct t1' t2)
-| IteElse (ct t2 t2' t1 : Term) :
-  Step t2 t2' →
-  Step (.ite ct t1 t2) (.ite ct t1 t2')
 
 lemma beta_typ (tp : type) (S : type) :
   Typ (Γ₁ ++ Γ) s S → Typ (Γ₁ ++ tp :: Γ) (shift_up_from Γ₁.length s) S := by
@@ -118,7 +116,7 @@ theorem preservation (t t' : Term) (tp : type) (Γ : TCtx) :
     intro hs ht
     unhygienic induction hs generalizing Γ tp <;> try grind [Typ]
     unhygienic cases ht
-    unhygienic cases a
+    unhygienic cases a_1
     rename_i tp1
     have lm := betar_preservation t_1 s tp1 tp Γ []
     grind
@@ -128,57 +126,44 @@ lemma weakening (t : Term) (tp : type) (Γ Γ₁ : TCtx) :
     intro ht
     induction ht <;> grind [Typ]
 
-mutual
-inductive NHead : Term → Prop where
-| var {n} : NHead (.Var n)
-| ite {ct t e} : NHead ct → NF t → NF e → NHead (.ite ct t e)
-| app {t s} : NHead t → NF s → NHead (.App t s)
-
-inductive NF : Term → Prop where
-| abs {t tp} : NF t → NF (t.Abs tp)
-| trueNF : NF .trueT
-| falseNF : NF .falseT
-| nhead  {t} : NHead t → NF t
-end
-
-theorem progress (t : Term) (td : Typ Γ t T) :
-  NF t ∨ ∃ t', Step t t' := by
+theorem progress (t : Term) (td : Typ [] t T) :
+  Value t ∨ ∃ t', Step t t' := by
+  generalize h : [] = Γ at td
   induction td
-  · grind [NF]
-  · grind [NF]
-  · grind [NF, NHead]
-  · rename_i ih
-    cases ih
-    · grind [NF, NHead]
-    · rename_i tp _ _ h
-      have ⟨ t', _ ⟩ := h
-      right
-      exists t'.Abs tp
-      grind [Step]
+  · grind [Value]
+  · grind [Value]
+  · grind
+  · grind [Value]
   · rename_i ih1 ih2
-    cases ih1 <;> cases ih2
-    · rename_i h1 h2
-      cases h1
-      · rename_i t₂ _ _ _ _ t' tp _ _
+    cases ih1 h
+    · rename_i hv
+      cases ih2 h
+      · rename_i typ _ _
+        cases typ <;> cases hv
+        rename_i t2 _ _ _ _ _ t' _
         right
-        exists (subst t' t₂)
+        exists subst t' t2
         grind [Step]
-      · sorry
-      · sorry
-      · grind [NF, NHead]
-    · rename_i t₁ t₂ _ _ _ _ _ _ h
-      have ⟨ t', _ ⟩ := h
+      · rename_i t1 t2 _ _ _ _ _ hs
+        have ⟨ t2', _ ⟩ := hs
+        right
+        exists t1.App t2'
+        grind [Step]
+    · rename_i t2 _ _ _ _ _ hs
+      have ⟨ t1', _ ⟩ := hs
       right
-      exists t₁.App t'
+      exists t1'.App t2
       grind [Step]
-    · rename_i t₁ t₂ _ _ _ _ _ h _
-      have ⟨ t', _ ⟩ := h
+  · rename_i ihc ih1 ih2
+    cases ihc h
+    · rename_i t1 t2 _ _ typ _ _ hv
+      cases typ <;> cases hv <;> right
+      · exists t1
+        grind [Step]
+      · exists t2
+        grind [Step]
+    · rename_i t1 t2 _ _ _ _ _ hs
+      have ⟨ ct', _ ⟩ := hs
       right
-      exists t'.App t₂
+      exists .ite ct' t1 t2
       grind [Step]
-    · rename_i t₁ t₂ _ _ _ _ _ h _
-      have ⟨ t', _ ⟩ := h
-      right
-      exists t'.App t₂
-      grind [Step]
-  · sorry
