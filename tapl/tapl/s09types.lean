@@ -2,6 +2,7 @@ import Mathlib.Tactic.Basic
 
 inductive type
 | boolean
+| nat
 | arr (tp : type) (ct : type)
 
 inductive Term
@@ -11,11 +12,20 @@ inductive Term
 | Var (x : Nat)
 | Abs (t : Term) (tp : type)
 | App (t₁ : Term) (t₂ : Term)
+| Zero
+| Succ (t : Term)
+| Pred (t : Term)
+| IsZero (t : Term)
+
+inductive NatValue : Term → Prop
+| ZeroV : NatValue .Zero
+| SuccV (t : Term) : NatValue t → NatValue (.Succ t)
 
 inductive Value : Term → Prop
 | Abs (t : Term) (tp : type) : Value (t.Abs tp)
 | trueV : Value .trueT
 | falseV : Value .falseT
+| NatV (t : Term) : NatValue t → Value t
 
 abbrev TCtx := List type
 
@@ -40,13 +50,27 @@ inductive Typ : TCtx → Term → type → Prop
   Typ Γ t₁ tp →
   Typ Γ t₂ tp →
   Typ Γ (.ite ct t₁ t₂) tp
+| TZero (Γ : TCtx) : Typ Γ .Zero type.nat
+| TSucc (t : Term) (Γ : TCtx) :
+  Typ Γ t type.nat →
+  Typ Γ (.Succ t) type.nat
+| TPred (t : Term) (Γ : TCtx) :
+  Typ Γ t type.nat →
+  Typ Γ (.Pred t) type.nat
+| TIsZero (t : Term) (Γ : TCtx) :
+  Typ Γ t type.nat →
+  Typ Γ (.IsZero t) type.boolean
 
 def shift_up_from (c : Nat) : Term → Term
+| .Zero => .Zero
+| .trueT => .trueT
+| .falseT => .falseT
+| .Succ t => .Succ (shift_up_from c t)
+| .Pred t => .Pred (shift_up_from c t)
+| .IsZero t => .IsZero (shift_up_from c t)
 | .Var x => if x < c then .Var x else .Var (x + 1)
 | .Abs t tp => .Abs (shift_up_from (c + 1) t) tp
 | .App t1 t2 => .App (shift_up_from c t1) (shift_up_from c t2)
-| .trueT => .trueT
-| .falseT => .falseT
 | .ite ct t1 t2 => .ite (shift_up_from c ct) (shift_up_from c t1) (shift_up_from c t2)
 
 def shift_up (s : Term) : Term := shift_up_from 0 s
@@ -64,6 +88,10 @@ def betar (k : Nat) (t s : Term) : Term :=
   | .trueT => .trueT
   | .falseT => .falseT
   | .ite ct t1 t2 => .ite (betar k ct s) (betar k t1 s) (betar k t2 s)
+  | .Zero => .Zero
+  | .Succ t => .Succ (betar k t s)
+  | .Pred t => .Pred (betar k t s)
+  | .IsZero t => .IsZero (betar k t s)
 
 abbrev subst (t s : Term) : Term := betar 0 t s
 
@@ -85,6 +113,25 @@ inductive Step : Term → Term → Prop
 | IteCond (ct ct' t1 t2 : Term) :
   Step ct ct' →
   Step (.ite ct t1 t2) (.ite ct' t1 t2)
+| Succ (t t' : Term) :
+  Step t t' →
+  Step (.Succ t) (.Succ t')
+| Pred (t t' : Term) :
+  Step t t' →
+  Step (.Pred t) (.Pred t')
+| PredZero :
+  Step (.Pred .Zero) .Zero
+| PredSucc (t : Term) :
+  NatValue t →
+  Step (.Pred (.Succ t)) t
+| IsZeroZero :
+  Step (.IsZero .Zero) .trueT
+| IsZeroSucc (t : Term) :
+  NatValue t →
+  Step (.IsZero (.Succ t)) .falseT
+| IsZero (t t' : Term) :
+  Step t t' →
+  Step (.IsZero t) (.IsZero t')
 
 lemma beta_typ (tp : type) (S : type) :
   Typ (Γ₁ ++ Γ) s S → Typ (Γ₁ ++ tp :: Γ) (shift_up_from Γ₁.length s) S := by
@@ -95,21 +142,22 @@ lemma betar_preservation (t s : Term) (S T : type) (Γ Γ₁ : TCtx) :
   Typ (Γ₁ ++ Γ) s S → Typ (Γ₁ ++ S :: Γ) t T → Typ (Γ₁ ++ Γ) (betar Γ₁.length t s) T := by
     intro hs ht
     unhygienic induction t generalizing Γ Γ₁ s S T
-    { grind [betar, Typ] }
-    { grind [betar, Typ] }
-    { grind [betar, Typ] }
-    { rw [betar]
-      unhygienic cases ht
-      grind [Typ] }
-    { unhygienic cases ht
+    all_goals (try grind [Typ, betar])
+    · cases ht
+      rw [betar]
+      split
+      · grind
+      · split
+        · grind [Typ]
+        · grind [Typ]
+    · cases ht
+      rename_i tp2 ih
       rw [betar]
       apply Typ.TAbs
-      apply t_ih (shift_up s) S tp₂ Γ (tp :: Γ₁)
-      { have lm := beta_typ tp (Γ₁ := []) (Γ := Γ₁ ++ Γ) (S := S) (s := s)
-        grind [shift_up] }
-      grind }
-    rw [betar]
-    grind [Typ]
+      apply t_ih (shift_up s) S tp2 Γ (tp :: Γ₁)
+      · have lm := beta_typ tp (Γ₁ := []) (Γ := Γ₁ ++ Γ) (S := S) (s := s)
+        grind [shift_up]
+      · grind
 
 theorem preservation (t t' : Term) (tp : type) (Γ : TCtx) :
   Step t t' → Typ Γ t tp → Typ Γ t' tp := by
@@ -126,6 +174,22 @@ lemma weakening (t : Term) (tp : type) (Γ Γ₁ : TCtx) :
     intro ht
     induction ht <;> grind [Typ]
 
+lemma nat_value_from (ht : Typ Γ t type.nat) (hv : Value t) : NatValue t := by
+  cases ht <;> cases hv
+  · contradiction
+  · contradiction
+  · contradiction
+  · grind
+  · grind
+  · contradiction
+
+lemma bool_value_from (ht : Typ Γ t type.boolean) (hv : Value t) :
+  t = .trueT ∨ t = .falseT := by
+  cases ht <;> cases hv
+  all_goals (try contradiction)
+  · grind
+  · grind
+
 theorem progress (t : Term) (td : Typ [] t T) :
   Value t ∨ ∃ t', Step t t' := by
   generalize h : [] = Γ at td
@@ -134,30 +198,31 @@ theorem progress (t : Term) (td : Typ [] t T) :
   · grind [Value]
   · grind
   · grind [Value]
-  · rename_i ih1 ih2
+  · rename_i ht _ ih1 ih2
     cases ih1 h
     · rename_i hv
+      cases ht <;> cases hv
+      all_goals (try contradiction)
       cases ih2 h
-      · rename_i typ _ _
-        cases typ <;> cases hv
-        rename_i t2 _ _ _ _ _ t' _
+      · rename_i t2 _ _ _ _ t _ _
         right
-        exists subst t' t2
+        exists subst t t2
         grind [Step]
-      · rename_i t1 t2 _ _ _ _ _ hs
+      · rename_i tp _ _ t _ hs
         have ⟨ t2', _ ⟩ := hs
         right
-        exists t1.App t2'
+        exists (t.Abs tp).App t2'
         grind [Step]
-    · rename_i t2 _ _ _ _ _ hs
+    · rename_i t2 _ _ _ _ hs
       have ⟨ t1', _ ⟩ := hs
       right
-      exists t1'.App t2
+      exists (.App t1' t2)
       grind [Step]
-  · rename_i ihc ih1 ih2
+  · rename_i ihc iht ihe
     cases ihc h
-    · rename_i t1 t2 _ _ typ _ _ hv
-      cases typ <;> cases hv <;> right
+    · rename_i t1 t2 _ _ _ _ _ _
+      right
+      cases bool_value_from (by assumption) (by assumption)
       · exists t1
         grind [Step]
       · exists t2
@@ -165,5 +230,46 @@ theorem progress (t : Term) (td : Typ [] t T) :
     · rename_i t1 t2 _ _ _ _ _ hs
       have ⟨ ct', _ ⟩ := hs
       right
-      exists .ite ct' t1 t2
+      exists (.ite ct' t1 t2)
+      grind [Step]
+  · grind [Value, NatValue]
+  · rename_i ih
+    cases ih h
+    · cases nat_value_from (by assumption) (by assumption)
+      · grind [Value, NatValue]
+      · grind [Value, NatValue]
+    · rename_i hs
+      have ⟨ t', _ ⟩ := hs
+      right
+      exists (.Succ t')
+      grind [Step]
+  · rename_i ih
+    cases ih h
+    · cases nat_value_from (by assumption) (by assumption)
+      · right
+        exists .Zero
+        grind [Step]
+      · rename_i t _ _ _
+        right
+        exists t
+        grind [Step]
+    · rename_i hs
+      have ⟨ t', _ ⟩ := hs
+      right
+      exists (.Pred t')
+      grind [Step]
+  · rename_i ht ih
+    cases ih h
+    · rename_i hv
+      have nv := nat_value_from (by assumption) hv
+      right
+      cases nv
+      · exists .trueT
+        grind [Step]
+      · exists .falseT
+        grind [Step]
+    · rename_i hs
+      have ⟨ t', _ ⟩ := hs
+      right
+      exists (.IsZero t')
       grind [Step]
