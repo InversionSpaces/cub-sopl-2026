@@ -9,15 +9,19 @@ inductive Term
 | Abs (t : Term) (tp : type)
 | App (t₁ : Term) (t₂ : Term)
 
-inductive Typ : List type → Term → type → Prop
-| TVar (x : Nat) (Γ : List type) (tp : type) :
-  x < Γ.length →
-  Γ[x]? = tp →
+abbrev TCtx := List type
+
+@[simp, grind]
+def TCtx.types (Γ : TCtx) (x : Nat) (tp : type) : Prop := Γ[x]? = tp
+
+inductive Typ : TCtx → Term → type → Prop
+| TVar (x : Nat) (Γ : TCtx) (tp : type) :
+  Γ.types x tp →
   Typ Γ (.Var x) tp
-| TAbs (t : Term) (Γ : List type) (tp₁ tp₂ : type) :
+| TAbs (t : Term) (Γ : TCtx) (tp₁ tp₂ : type) :
   Typ (tp₁ :: Γ) t tp₂ →
   Typ Γ (t.Abs tp₁) (tp₁.arr tp₂)
-| TApp (t₁ t₂ : Term) (Γ : List type) (tp₁ tp₂ : type) :
+| TApp (t₁ t₂ : Term) (Γ : TCtx) (tp₁ tp₂ : type) :
   Typ Γ t₁ (tp₁.arr tp₂) →
   Typ Γ t₂ tp₁ →
   Typ Γ (.App t₁ t₂) tp₂
@@ -29,7 +33,7 @@ def shift_up_from (c : Nat) : Term → Term
 
 def shift_up (s : Term) : Term := shift_up_from 0 s
 
-lemma TypDet (t : Term) (tp₁ tp₂ : type) (Γ : List type) :
+lemma TypDet (t : Term) (tp₁ tp₂ : type) (Γ : TCtx) :
   Typ Γ t tp₁ → Typ Γ t tp₂ → tp₁ = tp₂ := by
     intro h1 h2
     unhygienic induction t generalizing Γ tp₁ tp₂ <;> grind [Typ]
@@ -39,6 +43,8 @@ def betar (k : Nat) (t s : Term) : Term :=
   | .Var x => if x = k then s else if x < k then .Var x else .Var (x - 1)
   | .Abs t1 tp => (betar (k + 1) t1 (shift_up s)).Abs tp
   | .App t1 t2 => (betar k t1 s).App (betar k t2 s)
+
+abbrev subst (t s : Term) : Term := betar 0 t s
 
 inductive Step : Term → Term → Prop
 | Abs (t t' : Term) (tp : type) :
@@ -51,14 +57,14 @@ inductive Step : Term → Term → Prop
   Step s s' →
   Step (t.App s) (t.App s')
 | Beta (t s : Term) (tp : type) :
-  Step ((t.Abs tp).App s) (betar 0 t s)
+  Step ((t.Abs tp).App s) (subst t s)
 
 lemma beta_typ (tp : type) (S : type) :
   Typ (Γ₁ ++ Γ) s S → Typ (Γ₁ ++ tp :: Γ) (shift_up_from Γ₁.length s) S := by
   intro hs
   unhygienic induction s generalizing Γ₁ S <;> grind [Typ, shift_up_from]
 
-lemma betar_preservation (t s : Term) (S T : type) (Γ Γ₁ : List type) :
+lemma betar_preservation (t s : Term) (S T : type) (Γ Γ₁ : TCtx) :
   Typ (Γ₁ ++ Γ) s S → Typ (Γ₁ ++ S :: Γ) t T → Typ (Γ₁ ++ Γ) (betar Γ₁.length t s) T := by
     intro hs ht
     unhygienic induction t generalizing Γ Γ₁ s S T
@@ -75,7 +81,7 @@ lemma betar_preservation (t s : Term) (S T : type) (Γ Γ₁ : List type) :
     rw [betar]
     grind [Typ]
 
-theorem preservation (t t' : Term) (tp : type) (Γ : List type) :
+theorem preservation (t t' : Term) (tp : type) (Γ : TCtx) :
   Step t t' → Typ Γ t tp → Typ Γ t' tp := by
     intro hs ht
     unhygienic induction hs generalizing Γ tp <;> try grind [Typ]
@@ -85,7 +91,7 @@ theorem preservation (t t' : Term) (tp : type) (Γ : List type) :
     have lm := betar_preservation t_1 s tp1 tp Γ []
     grind
 
-lemma weakening (t : Term) (tp : type) (Γ Γ₁ : List type) :
+lemma weakening (t : Term) (tp : type) (Γ Γ₁ : TCtx) :
   Typ Γ t tp → Typ (Γ ++ Γ₁) t tp := by
     intro ht
     induction ht <;> grind [Typ]
@@ -113,12 +119,13 @@ theorem progress (t : Term) (td : Typ Γ t T) :
       exists t'.Abs tp
       grind [Step]
   · rename_i ih1 ih2
+    -- Actually no need to do all 4 cases
     cases ih1 <;> cases ih2
     · rename_i h1 h2
       cases h1
       · rename_i t₂ _ _ _ _ t' tp _ _
         right
-        exists (betar 0 t' t₂)
+        exists (subst t' t₂)
         grind [Step]
       · grind [NF, NHead]
     · rename_i t₁ t₂ _ _ _ _ _ _ h
