@@ -4,6 +4,8 @@ inductive type
 | boolean
 | nat
 | arr (tp : type) (ct : type)
+| tuple (tp : List type)
+deriving Inhabited
 
 inductive Term
 | trueT : Term
@@ -16,6 +18,9 @@ inductive Term
 | Succ (t : Term)
 | Pred (t : Term)
 | IsZero (t : Term)
+| Tuple (tp : List Term)
+| Proj (arg : Term) (n : Nat)
+deriving Inhabited
 
 inductive NatValue : Term → Prop
 | ZeroV : NatValue .Zero
@@ -26,6 +31,9 @@ inductive Value : Term → Prop
 | trueV : Value .trueT
 | falseV : Value .falseT
 | NatV (t : Term) : NatValue t → Value t
+| TupleV (tp : List Term) :
+  (∀ x ∈ tp, Value x) →
+  Value (.Tuple tp)
 
 abbrev TCtx := List type
 
@@ -60,6 +68,15 @@ inductive Typ : TCtx → Term → type → Prop
 | TIsZero (t : Term) (Γ : TCtx) :
   Typ Γ t type.nat →
   Typ Γ (.IsZero t) type.boolean
+| TTuple (tup : List Term) (tupt : List type) :
+  tup.length = tupt.length →
+  (∀ i < tup.length, Typ Γ tup[i]! tupt[i]!) →
+  Typ Γ (.Tuple tup) (.tuple tupt)
+| TProj (tp : Term) (tupt : List type) (k : Nat) (tp₁ : type) :
+  Typ Γ tp (.tuple tupt) →
+  k < tupt.length →
+  tp₁ = tupt[k]! →
+  Typ Γ (.Proj tp k) tp₁
 
 def shift_up_from (c : Nat) : Term → Term
 | .Zero => .Zero
@@ -72,13 +89,19 @@ def shift_up_from (c : Nat) : Term → Term
 | .Abs t tp => .Abs (shift_up_from (c + 1) t) tp
 | .App t1 t2 => .App (shift_up_from c t1) (shift_up_from c t2)
 | .ite ct t1 t2 => .ite (shift_up_from c ct) (shift_up_from c t1) (shift_up_from c t2)
+| .Tuple tp => .Tuple (tp.map (fun x => shift_up_from c x))
+| .Proj arg n => .Proj (shift_up_from c arg) n
 
 def shift_up (s : Term) : Term := shift_up_from 0 s
 
 lemma TypDet (t : Term) (tp₁ tp₂ : type) (Γ : TCtx) :
   Typ Γ t tp₁ → Typ Γ t tp₂ → tp₁ = tp₂ := by
     intro h1 h2
-    unhygienic induction t generalizing Γ tp₁ tp₂ <;> grind [Typ]
+    unhygienic induction h1 generalizing tp₂ <;> try grind [Typ]
+    { cases h2
+      simp only [type.tuple.injEq]
+      ext
+      grind }
 
 def betar (k : Nat) (t s : Term) : Term :=
   match t with
@@ -92,6 +115,8 @@ def betar (k : Nat) (t s : Term) : Term :=
   | .Succ t => .Succ (betar k t s)
   | .Pred t => .Pred (betar k t s)
   | .IsZero t => .IsZero (betar k t s)
+  | .Tuple tp => .Tuple (tp.map (fun t => betar k t s))
+  | .Proj arg n => .Proj (betar k arg s) n
 
 abbrev subst (t s : Term) : Term := betar 0 t s
 
@@ -132,63 +157,72 @@ inductive Step : Term → Term → Prop
 | IsZero (t t' : Term) :
   Step t t' →
   Step (.IsZero t) (.IsZero t')
+| ProjTuple (tp : List Term) :
+  Step (.Proj (.Tuple tp) k) tp[k]!
+| Proj (t t' : Term) :
+  Step t t' →
+  Step (.Proj t k) (.Proj t' k)
+| Tuple (t' : Term) (k : Nat) (tp : List Term) :
+  Step tp[k]! t' →
+  Step (.Tuple tp) (.Tuple (tp.set k t'))
+
 
 lemma beta_typ (tp : type) (S : type) :
-  Typ (Γ₁ ++ Γ) s S → Typ (Γ₁ ++ tp :: Γ) (shift_up_from Γ₁.length s) S := by
-  intro hs
-  unhygienic induction s generalizing Γ₁ S <;> grind [Typ, shift_up_from]
+  Γ₂ = Γ₁ ++ Γ → Typ Γ₂ s S → Typ (Γ₁ ++ tp :: Γ) (shift_up_from Γ₁.length s) S := by
+  intro hs hs1
+  unhygienic induction hs1 generalizing Γ₁ Γ <;> try grind [Typ, shift_up_from]
 
 lemma betar_preservation (t s : Term) (S T : type) (Γ Γ₁ : TCtx) :
-  Typ (Γ₁ ++ Γ) s S → Typ (Γ₁ ++ S :: Γ) t T → Typ (Γ₁ ++ Γ) (betar Γ₁.length t s) T := by
-    intro hs ht
-    unhygienic induction t generalizing Γ Γ₁ s S T
-    all_goals (try grind [Typ, betar])
-    · cases ht
-      rw [betar]
-      split
-      · grind
-      · split
-        · grind [Typ]
-        · grind [Typ]
-    · cases ht
-      rename_i tp2 ih
-      rw [betar]
+  Γ₂ = Γ₁ ++ S :: Γ → Typ (Γ₁ ++ Γ) s S → Typ Γ₂ t T → Typ (Γ₁ ++ Γ) (betar Γ₁.length t s) T := by
+    intro heq hs ht
+    unhygienic induction ht generalizing Γ₁ S s
+    iterate 2 { grind [Typ, betar] }
+    { rw [betar]
+      repeat' split <;> grind [Typ] }
+    { rw [betar]
       apply Typ.TAbs
-      apply t_ih (shift_up s) S tp2 Γ (tp :: Γ₁)
-      · have lm := beta_typ tp (Γ₁ := []) (Γ := Γ₁ ++ Γ) (S := S) (s := s)
-        grind [shift_up]
-      · grind
+      have ih := a_ih (shift_up s) S (tp₁ :: Γ₁) (by grind) (by
+        rw [shift_up]
+        have typ_lm := beta_typ tp₁ S (Γ₁ := []) (Γ := Γ₁ ++ Γ) (by grind) hs
+        grind)
+      grind }
+    all_goals { grind [betar, Typ] }
 
 theorem preservation (t t' : Term) (tp : type) (Γ : TCtx) :
   Step t t' → Typ Γ t tp → Typ Γ t' tp := by
     intro hs ht
-    unhygienic induction hs generalizing Γ tp <;> try grind [Typ]
-    unhygienic cases ht
-    unhygienic cases a_1
-    rename_i tp1
-    have lm := betar_preservation t_1 s tp1 tp Γ []
-    grind
+    unhygienic induction hs generalizing Γ tp
+    iterate 2 { grind [Typ] }
+    { unhygienic cases ht
+      unhygienic cases a_1
+      rename_i tp1
+      have lm := betar_preservation t_1 s tp1 tp Γ [] (Γ₂ := tp1 :: Γ)
+      grind }
+    iterate 12 { grind [Typ] }
+    cases ht
+    apply Typ.TTuple <;> grind
 
 lemma weakening (t : Term) (tp : type) (Γ Γ₁ : TCtx) :
   Typ Γ t tp → Typ (Γ ++ Γ₁) t tp := by
     intro ht
     induction ht <;> grind [Typ]
 
-lemma nat_value_from (ht : Typ Γ t type.nat) (hv : Value t) : NatValue t := by
-  cases ht <;> cases hv
-  · contradiction
-  · contradiction
-  · contradiction
-  · grind
-  · grind
-  · contradiction
+lemma nat_value_from_gen (tp : type) (ht : Typ Γ t tp) (hv : Value t) :
+  tp = .nat → NatValue t := by
+  intro heq
+  cases ht <;> cases hv <;> try grind [NatValue, Value]
+
+lemma nat_value_from (ht : Typ Γ t .nat) (hv : Value t) :
+  NatValue t := by
+  grind [nat_value_from_gen]
+
+lemma bool_value_from_gen (tp : type) (ht : Typ Γ t tp) (hv : Value t) :
+  tp = .boolean → (t = .trueT ∨ t = .falseT) := by
+  cases ht <;> cases hv <;> grind [NatValue]
 
 lemma bool_value_from (ht : Typ Γ t type.boolean) (hv : Value t) :
   t = .trueT ∨ t = .falseT := by
-  cases ht <;> cases hv
-  all_goals (try contradiction)
-  · grind
-  · grind
+  grind [bool_value_from_gen]
 
 theorem progress (t : Term) (td : Typ [] t T) :
   Value t ∨ ∃ t', Step t t' := by
@@ -200,15 +234,16 @@ theorem progress (t : Term) (td : Typ [] t T) :
   · grind [Value]
   · rename_i ht _ ih1 ih2
     cases ih1 h
-    · rename_i hv
+    · rename_i tp₁ tp₂ a hv
+      generalize hp : tp₁.arr tp₂ = tp at ht
       cases ht <;> cases hv
       all_goals (try contradiction)
       cases ih2 h
-      · rename_i t2 _ _ _ _ t _ _
+      · rename_i t2 _ t _ _ _ _
         right
         exists subst t t2
         grind [Step]
-      · rename_i tp _ _ t _ hs
+      · rename_i t tp _ _  hs
         have ⟨ t2', _ ⟩ := hs
         right
         exists (t.Abs tp).App t2'
@@ -273,3 +308,33 @@ theorem progress (t : Term) (td : Typ [] t T) :
       right
       exists (.IsZero t')
       grind [Step]
+  { rename_i tup tupt heq a a_ih
+    by_cases ha : ∀ x ∈ tup, Value x
+    { left
+      apply Value.TupleV
+      apply ha }
+    simp only [Classical.not_forall] at ha
+    rcases ha with ⟨x, hx, hvx⟩
+    have ex : ∃ i < tup.length, tup[i]! = x := by
+      clear a a_ih
+      rw [List.mem_iff_getElem] at hx
+      rcases hx with ⟨y, hy⟩
+      exists y
+      grind
+    right
+    rcases ex with ⟨i, hi⟩
+    have : ∃ t', Step tup[i]! t' := by grind
+    rcases this with ⟨tp', htp⟩
+    exists (Term.Tuple (tup.set i tp'))
+    apply Step.Tuple
+    apply htp }
+  right
+  rename_i k tp₁ htp hk heq ih
+  cases ih h <;> rename_i h1
+  { cases h1 <;> (rename_i tp t'; cases htp) <;> try grind [NatValue]
+    exists tp[k]!
+    apply Step.ProjTuple }
+  unhygienic cases h1
+  exists w.Proj k
+  apply Step.Proj
+  apply h_1
