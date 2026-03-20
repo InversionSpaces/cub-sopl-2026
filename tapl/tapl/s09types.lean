@@ -1,6 +1,7 @@
 import Mathlib.Tactic.Basic
 
 inductive type
+| unit
 | boolean
 | nat
 | arr (tp : type) (ct : type)
@@ -8,6 +9,7 @@ inductive type
 deriving Inhabited
 
 inductive Term
+| unit : Term
 | trueT : Term
 | falseT : Term
 | ite (ct : Term) (t₁ : Term) (t₂ : Term) : Term
@@ -30,6 +32,7 @@ inductive Value : Term → Prop
 | Abs (t : Term) (tp : type) : Value (t.Abs tp)
 | trueV : Value .trueT
 | falseV : Value .falseT
+| unitV : Value .unit
 | NatV (t : Term) : NatValue t → Value t
 | TupleV (tp : List Term) :
   (∀ x ∈ tp, Value x) →
@@ -41,6 +44,7 @@ abbrev TCtx := List type
 def TCtx.types (Γ : TCtx) (x : Nat) (tp : type) : Prop := Γ[x]? = tp
 
 inductive Typ : TCtx → Term → type → Prop
+| Tunit : Typ Γ .unit .unit
 | Ttrue : Typ Γ .trueT type.boolean
 | Tfalse : Typ Γ .falseT type.boolean
 | TVar (x : Nat) (Γ : TCtx) (tp : type) :
@@ -79,6 +83,7 @@ inductive Typ : TCtx → Term → type → Prop
   Typ Γ (.Proj tp k) tp₁
 
 def shift_up_from (c : Nat) : Term → Term
+| .unit => .unit
 | .Zero => .Zero
 | .trueT => .trueT
 | .falseT => .falseT
@@ -110,6 +115,7 @@ def betar (k : Nat) (t s : Term) : Term :=
   | .App t1 t2 => (betar k t1 s).App (betar k t2 s)
   | .trueT => .trueT
   | .falseT => .falseT
+  | .unit => .unit
   | .ite ct t1 t2 => .ite (betar k ct s) (betar k t1 s) (betar k t2 s)
   | .Zero => .Zero
   | .Succ t => .Succ (betar k t s)
@@ -176,7 +182,7 @@ lemma betar_preservation (t s : Term) (S T : type) (Γ Γ₁ : TCtx) :
   Γ₂ = Γ₁ ++ S :: Γ → Typ (Γ₁ ++ Γ) s S → Typ Γ₂ t T → Typ (Γ₁ ++ Γ) (betar Γ₁.length t s) T := by
     intro heq hs ht
     unhygienic induction ht generalizing Γ₁ S s
-    iterate 2 { grind [Typ, betar] }
+    iterate 3 { grind [Typ, betar] }
     { rw [betar]
       repeat' split <;> grind [Typ] }
     { rw [betar]
@@ -228,6 +234,7 @@ theorem progress (t : Term) (td : Typ [] t T) :
   Value t ∨ ∃ t', Step t t' := by
   generalize h : [] = Γ at td
   induction td
+  · grind [Value]
   · grind [Value]
   · grind [Value]
   · grind
