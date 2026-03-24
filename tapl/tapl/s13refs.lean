@@ -220,40 +220,132 @@ lemma betar_preservation (t s : Term) (S T : type) (Γ Γ₁ : TCtx) :
       · grind
     all_goals (try grind [Typ, betar])
 
-inductive STyp : TCtx → STCtx → Store → Prop
-| empty : STyp Γ [] []
-| extend (vt : ValueTerm) (tp : type) :
-  Typ Γ S vt tp → STyp Γ S μ →
-  STyp Γ (S ++ [tp]) (μ ++ [vt])
+structure STyp (Γ : TCtx) (C : STCtx) (μ : Store) : Prop where
+  hl : C.length = μ.length
+  ht : ∀ l tp, (h : C.types l tp) → Typ Γ C (μ.get ⟨ l, by grind ⟩) tp
 
 @[simp, grind]
 def Types (Γ : TCtx) (S : STCtx) (s : Term × Store) (tp : type) : Prop :=
   match s with
   | (t, μ) => Typ Γ S t tp ∧ STyp Γ S μ
 
+@[simp]
+lemma stctx_type_weakening :
+  Typ Γ C t T → C <+: C' → Typ Γ C' t T := by
+  intro ht hpref
+  cases hpref
+  induction ht <;> grind [Typ]
+
+lemma styp_set (v : ValueTerm) :
+  STyp Γ C μ → C.types l T → Typ Γ C v T →
+  STyp Γ C (μ.set l v) := by grind [STyp]
+
 theorem preservation (Γ : TCtx) (C : STCtx) (tp : type) :
   Step s s' → Types Γ C s tp →
   ∃ C', Types Γ C' s' tp ∧ C <+: C' := by
     intro hs ht
     induction hs generalizing tp
-    · sorry
-    · sorry
-    · sorry
-    · sorry
-    · sorry
-    · sorry
-    · sorry
-    · sorry
-    · sorry
-    · sorry
-    · sorry
-    · sorry
-    · sorry
-    · sorry
-    · sorry
-    · sorry
-    · sorry
-    · sorry
+    · rename_i ih
+      rcases ht with ⟨ typ, styp ⟩
+      cases typ
+      rcases ih _ ⟨ by assumption, by assumption ⟩ with ⟨ C', ⟨ _, _ ⟩, hpref ⟩
+      exists C'
+      grind [Typ, stctx_type_weakening]
+    · rename_i ih
+      rcases ht with ⟨ typ, styp ⟩
+      cases typ
+      rcases ih _ ⟨ by assumption, by assumption ⟩ with ⟨ C', ⟨ _, _ ⟩, hpref ⟩
+      exists C'
+      repeat constructor <;> try assumption
+      apply stctx_type_weakening
+      repeat assumption
+    · rename_i t s tp _
+      rcases ht with ⟨ typ, styp ⟩
+      cases typ
+      rename_i ta
+      cases ta
+      rename_i stp _ _ _
+      exists C
+      have _ := betar_preservation (C := C) t s stp tp Γ []
+      grind
+    · rcases ht with ⟨ typ, styp ⟩
+      cases typ
+      exists C
+      grind
+    · rcases ht with ⟨ typ, styp ⟩
+      cases typ
+      exists C
+      grind
+    · rename_i ih
+      rcases ht with ⟨ typ, styp ⟩
+      cases typ
+      rcases ih _ ⟨ by assumption, by assumption ⟩ with ⟨ C', ⟨ _, _ ⟩, hpref ⟩
+      exists C'
+      repeat constructor <;> try assumption
+      all_goals (
+        apply stctx_type_weakening
+        repeat assumption
+      )
+    · rename_i ih
+      rcases ht with ⟨ typ, styp ⟩
+      cases typ
+      rcases ih _ ⟨ by assumption, by assumption ⟩ with ⟨ C', ⟨ _, _ ⟩, hpref ⟩
+      exists C'
+      repeat constructor <;> try assumption
+    · rename_i ih
+      rcases ht with ⟨ typ, styp ⟩
+      cases typ
+      rcases ih _ ⟨ by assumption, by assumption ⟩ with ⟨ C', ⟨ _, _ ⟩, hpref ⟩
+      exists C'
+      repeat constructor <;> try assumption
+    · rcases ht with ⟨ typ, styp ⟩
+      cases typ
+      exists C
+      grind
+    · rcases ht with ⟨ typ, styp ⟩
+      cases typ
+      rename_i ntyp
+      cases ntyp
+      exists C
+      grind
+    · exists C
+      grind [Typ]
+    · exists C
+      grind [Typ]
+    · rename_i ih
+      rcases ht with ⟨ typ, styp ⟩
+      cases typ
+      rcases ih _ ⟨ by assumption, by assumption ⟩ with ⟨ C', ⟨ _, _ ⟩, hpref ⟩
+      exists C'
+      repeat constructor <;> try assumption
+    · rename_i ih
+      rcases ht with ⟨ typ, styp ⟩
+      cases typ
+      rcases ih _ ⟨ by assumption, by assumption ⟩ with ⟨ C', ⟨ _, _ ⟩, hpref ⟩
+      exists C'
+      repeat constructor <;> try assumption
+    · rename_i ih
+      rcases ht with ⟨ typ, styp ⟩
+      cases typ
+      rcases ih _ ⟨ by assumption, by assumption ⟩ with ⟨ C', ⟨ _, _ ⟩, hpref ⟩
+      exists C'
+      repeat constructor <;> try assumption
+    · rename_i ih
+      rcases ht with ⟨ typ, styp ⟩
+      cases typ
+      rcases ih _ ⟨ by assumption, by assumption ⟩ with ⟨ C', ⟨ _, _ ⟩, hpref ⟩
+      exact ⟨ C', by grind [Typ, stctx_type_weakening] ⟩
+    · rename_i ih
+      rcases ht with ⟨ typ, styp ⟩
+      cases typ
+      rcases ih _ ⟨ by assumption, by assumption ⟩ with ⟨ C', ⟨ _, _ ⟩, hpref ⟩
+      exact ⟨ C', by
+        repeat constructor <;> try assumption
+        apply stctx_type_weakening
+        repeat assumption
+      ⟩
+    · exists C
+      grind [Typ, styp_set]
 
 lemma weakening (t : Term) (tp : type) (Γ Γ₁ : TCtx) :
   Typ Γ t S → Typ (Γ ++ Γ₁) t tp := by
