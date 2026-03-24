@@ -1,0 +1,361 @@
+import Mathlib.Tactic.Basic
+
+inductive type
+| unit
+| boolean
+| nat
+| arr (tp : type) (ct : type)
+| ref (tp : type)
+
+inductive Term
+| UnitT : Term
+| trueT : Term
+| falseT : Term
+| ite (ct : Term) (t₁ : Term) (t₂ : Term) : Term
+| Var (x : Nat)
+| Abs (t : Term) (tp : type)
+| App (t₁ : Term) (t₂ : Term)
+| Zero
+| Succ (t : Term)
+| Pred (t : Term)
+| IsZero (t : Term)
+| Ref (t : Term)
+| Deref (t : Term)
+| Assign (t₁ : Term) (t₂ : Term)
+| Loc (l : Nat)
+
+inductive NatValue : Term → Prop
+| ZeroV : NatValue .Zero
+| SuccV (t : Term) : NatValue t → NatValue (.Succ t)
+
+inductive Value : Term → Prop
+| Abs (t : Term) (tp : type) : Value (t.Abs tp)
+| trueV : Value .trueT
+| falseV : Value .falseT
+| NatV (t : Term) : NatValue t → Value t
+| LocV (l : Nat) : Value (.Loc l)
+| UnitV : Value .UnitT
+
+abbrev TCtx := List type
+abbrev STCtx := List type
+
+@[simp, grind]
+def TCtx.types (Γ : TCtx) (x : Nat) (tp : type) : Prop := Γ[x]? = tp
+
+@[simp, grind]
+def STCtx.types (S : STCtx) (l : Nat) (tp : type) : Prop := S[l]? = tp
+
+inductive Typ : TCtx → STCtx → Term → type → Prop
+| Ttrue : Typ Γ C .trueT type.boolean
+| Tfalse : Typ Γ C .falseT type.boolean
+| TVar (x : Nat) (Γ : TCtx) (C : STCtx) (tp : type) :
+  Γ.types x tp →
+  Typ Γ C (.Var x) tp
+| TAbs (t : Term) (Γ : TCtx) (C : STCtx) (tp₁ tp₂ : type) :
+  Typ (tp₁ :: Γ) C t tp₂ →
+  Typ Γ C (t.Abs tp₁) (tp₁.arr tp₂)
+| TApp (t₁ t₂ : Term) (Γ : TCtx) (C : STCtx) (tp₁ tp₂ : type) :
+  Typ Γ C t₁ (tp₁.arr tp₂) →
+  Typ Γ C t₂ tp₁ →
+  Typ Γ C (.App t₁ t₂) tp₂
+| Tite (ct : Term) (t₁ t₂ : Term) (Γ : TCtx) (C : STCtx) (tp : type) :
+  Typ Γ C ct type.boolean →
+  Typ Γ C t₁ tp →
+  Typ Γ C t₂ tp →
+  Typ Γ C (.ite ct t₁ t₂) tp
+| TZero (Γ : TCtx) : Typ Γ C .Zero type.nat
+| TSucc (t : Term) (Γ : TCtx) (C : STCtx) :
+  Typ Γ C t type.nat →
+  Typ Γ C (.Succ t) type.nat
+| TPred (t : Term) (Γ : TCtx) (C : STCtx) :
+  Typ Γ C t type.nat →
+  Typ Γ C (.Pred t) type.nat
+| TIsZero (t : Term) (Γ : TCtx) (C : STCtx) :
+  Typ Γ C t type.nat →
+  Typ Γ C (.IsZero t) type.boolean
+| TUnit (Γ : TCtx) : Typ Γ C .UnitT type.unit
+| TRef (t : Term) (Γ : TCtx) (C : STCtx) (tp : type) :
+  Typ Γ C t tp →
+  Typ Γ C (.Ref t) (type.ref tp)
+| TDeref (t : Term) (Γ : TCtx) (C : STCtx) (tp : type) :
+  Typ Γ C t (type.ref tp) →
+  Typ Γ C (.Deref t) tp
+| TAssign (t₁ t₂ : Term) (Γ : TCtx) (C : STCtx) (tp : type) :
+  Typ Γ C t₁ (type.ref tp) →
+  Typ Γ C t₂ tp →
+  Typ Γ C (.Assign t₁ t₂) type.unit
+| TLoc (l : Nat) (Γ : TCtx) (C : STCtx) (tp : type) :
+  C.types l tp →
+  Typ Γ C (.Loc l) (type.ref tp)
+
+def shift_up_from (c : Nat) : Term → Term
+| .UnitT => .UnitT
+| .Zero => .Zero
+| .trueT => .trueT
+| .falseT => .falseT
+| .Succ t => .Succ (shift_up_from c t)
+| .Pred t => .Pred (shift_up_from c t)
+| .IsZero t => .IsZero (shift_up_from c t)
+| .Var x => if x < c then .Var x else .Var (x + 1)
+| .Abs t tp => .Abs (shift_up_from (c + 1) t) tp
+| .App t1 t2 => .App (shift_up_from c t1) (shift_up_from c t2)
+| .ite ct t1 t2 => .ite (shift_up_from c ct) (shift_up_from c t1) (shift_up_from c t2)
+| .Ref t => .Ref (shift_up_from c t)
+| .Deref t => .Deref (shift_up_from c t)
+| .Assign t1 t2 => .Assign (shift_up_from c t1) (shift_up_from c t2)
+| .Loc l => .Loc l
+
+def shift_up (s : Term) : Term := shift_up_from 0 s
+
+lemma TypDet (t : Term) (tp₁ tp₂ : type) (Γ : TCtx) (S : STCtx) :
+  Typ Γ S t tp₁ → Typ Γ S t tp₂ → tp₁ = tp₂ := by
+    intro h1 h2
+    unhygienic induction t generalizing Γ tp₁ tp₂ <;> grind [Typ]
+
+def betar (k : Nat) (t s : Term) : Term :=
+  match t with
+  | .Var x => if x = k then s else if x < k then .Var x else .Var (x - 1)
+  | .Abs t1 tp => (betar (k + 1) t1 (shift_up s)).Abs tp
+  | .App t1 t2 => (betar k t1 s).App (betar k t2 s)
+  | .trueT => .trueT
+  | .falseT => .falseT
+  | .ite ct t1 t2 => .ite (betar k ct s) (betar k t1 s) (betar k t2 s)
+  | .Zero => .Zero
+  | .Succ t => .Succ (betar k t s)
+  | .Pred t => .Pred (betar k t s)
+  | .IsZero t => .IsZero (betar k t s)
+  | .UnitT => .UnitT
+  | .Ref t => .Ref (betar k t s)
+  | .Deref t => .Deref (betar k t s)
+  | .Assign t1 t2 => .Assign (betar k t1 s) (betar k t2 s)
+  | .Loc l => .Loc l
+
+abbrev subst (t s : Term) : Term := betar 0 t s
+
+abbrev ValueTerm := { x : Term // Value x }
+abbrev Store := List ValueTerm
+
+@[simp, grind]
+def Store.contains (μ : Store) (l : Nat) : Prop := μ.length > l
+
+inductive Step : Term × Store → Term × Store → Prop
+| AppL (t t' s : Term) :
+  Step (t, μ) (t', μ') →
+  Step (t.App s, μ) (t'.App s, μ')
+| AppR (t s' s : Term) :
+  Value t →
+  Step (s, μ) (s', μ') →
+  Step (t.App s, μ) (t.App s', μ')
+| Beta (t s : Term) (tp : type) :
+  Value s →
+  Step ((t.Abs tp).App s, μ) (subst t s, μ)
+| IteTrue (t1 t2 : Term) :
+  Step (.ite .trueT t1 t2, μ) (t1, μ)
+| IteFalse (t1 t2 : Term) :
+  Step (.ite .falseT t1 t2, μ) (t2, μ)
+| IteCond (ct ct' t1 t2 : Term) :
+  Step (ct, μ) (ct', μ') →
+  Step (.ite ct t1 t2, μ) (.ite ct' t1 t2, μ')
+| Succ (t t' : Term) :
+  Step (t, μ) (t', μ') →
+  Step (.Succ t, μ) (.Succ t', μ')
+| Pred (t t' : Term) :
+  Step (t, μ) (t', μ') →
+  Step (.Pred t, μ) (.Pred t', μ')
+| PredZero :
+  Step (.Pred .Zero, μ) (.Zero, μ)
+| PredSucc (t : Term) :
+  NatValue t →
+  Step (.Pred (.Succ t), μ) (t, μ)
+| IsZeroZero :
+  Step (.IsZero .Zero, μ) (.trueT, μ)
+| IsZeroSucc (t : Term) :
+  NatValue t →
+  Step (.IsZero (.Succ t), μ) (.falseT, μ)
+| IsZero (t t' : Term) :
+  Step (t, μ) (t', μ') →
+  Step (.IsZero t, μ) (.IsZero t', μ')
+| Ref (t t' : Term) :
+  Step (t, μ) (t', μ') →
+  Step (.Ref t, μ) (.Ref t', μ')
+| Deref (t t' : Term) :
+  Step (t, μ) (t', μ') →
+  Step (.Deref t, μ) (.Deref t', μ')
+| AssignL (t₁ t₁' t₂ : Term) :
+  Step (t₁, μ) (t₁', μ') →
+  Step (.Assign t₁ t₂, μ) (.Assign t₁' t₂, μ')
+| AssignR (t₁ t₂ t₂' : Term) :
+  Value t₁ →
+  Step (t₂, μ) (t₂', μ') →
+  Step (.Assign t₁ t₂, μ) (.Assign t₁ t₂', μ')
+| Assign (l : Nat) (t : Term) (μ : Store) :
+  (hv : Value t) → Store.contains μ l →
+  Step (.Assign (.Loc l) t, μ) (.UnitT, μ.set l ⟨ t, hv ⟩)
+
+lemma beta_typ (tp S : type) (s : Term) :
+  Typ (Γ₁ ++ Γ) C s S → Typ (Γ₁ ++ tp :: Γ) C (shift_up_from Γ₁.length s) S := by
+  intro hs
+  unhygienic induction s generalizing Γ₁ S <;> grind [Typ, shift_up_from]
+
+lemma betar_preservation (t s : Term) (S T : type) (Γ Γ₁ : TCtx) :
+  Typ (Γ₁ ++ Γ) C s S → Typ (Γ₁ ++ S :: Γ) C t T → Typ (Γ₁ ++ Γ) C (betar Γ₁.length t s) T := by
+    intro hs ht
+    unhygienic induction t generalizing Γ Γ₁ s S T
+    case Var =>
+      cases ht
+      rw [betar]
+      split
+      · grind
+      · split
+        · grind [Typ]
+        · grind [Typ]
+    case Abs =>
+      cases ht
+      rename_i tp2 ih
+      rw [betar]
+      apply Typ.TAbs
+      apply t_ih (shift_up s) S tp2 Γ (tp :: Γ₁)
+      · have lm := beta_typ (C := C) tp (Γ₁ := []) (Γ := Γ₁ ++ Γ) (S := S) (s := s)
+        grind [shift_up]
+      · grind
+    all_goals (try grind [Typ, betar])
+
+inductive STyp : TCtx → STCtx → Store → Prop
+| empty : STyp Γ [] []
+| extend (vt : ValueTerm) (tp : type) :
+  Typ Γ S vt tp → STyp Γ S μ →
+  STyp Γ (S ++ [tp]) (μ ++ [vt])
+
+@[simp, grind]
+def Types (Γ : TCtx) (S : STCtx) (s : Term × Store) (tp : type) : Prop :=
+  match s with
+  | (t, μ) => Typ Γ S t tp ∧ STyp Γ S μ
+
+theorem preservation (Γ : TCtx) (C : STCtx) (tp : type) :
+  Step s s' → Types Γ C s tp →
+  ∃ C', Types Γ C' s' tp ∧ C <+: C' := by
+    intro hs ht
+    induction hs generalizing tp
+    · sorry
+    · sorry
+    · sorry
+    · sorry
+    · sorry
+    · sorry
+    · sorry
+    · sorry
+    · sorry
+    · sorry
+    · sorry
+    · sorry
+    · sorry
+    · sorry
+    · sorry
+    · sorry
+    · sorry
+    · sorry
+
+lemma weakening (t : Term) (tp : type) (Γ Γ₁ : TCtx) :
+  Typ Γ t S → Typ (Γ ++ Γ₁) t tp := by
+    intro ht
+    induction ht <;> grind [Typ]
+
+lemma nat_value_from (ht : Typ Γ t type.nat) (hv : Value t) : NatValue t := by
+  cases ht <;> cases hv
+  · contradiction
+  · contradiction
+  · contradiction
+  · grind
+  · grind
+  · contradiction
+
+lemma bool_value_from (ht : Typ Γ t type.boolean) (hv : Value t) :
+  t = .trueT ∨ t = .falseT := by
+  cases ht <;> cases hv
+  all_goals (try contradiction)
+  · grind
+  · grind
+
+theorem progress (t : Term) (td : Typ [] t T) :
+  Value t ∨ ∃ t', Step t t' := by
+  generalize h : [] = Γ at td
+  induction td
+  · grind [Value]
+  · grind [Value]
+  · grind
+  · grind [Value]
+  · rename_i ht _ ih1 ih2
+    cases ih1 h
+    · rename_i hv
+      cases ht <;> cases hv
+      all_goals (try contradiction)
+      cases ih2 h
+      · rename_i t2 _ _ _ _ t _ _
+        right
+        exists subst t t2
+        grind [Step]
+      · rename_i tp _ _ t _ hs
+        have ⟨ t2', _ ⟩ := hs
+        right
+        exists (t.Abs tp).App t2'
+        grind [Step]
+    · rename_i t2 _ _ _ _ hs
+      have ⟨ t1', _ ⟩ := hs
+      right
+      exists (.App t1' t2)
+      grind [Step]
+  · rename_i ihc iht ihe
+    cases ihc h
+    · rename_i t1 t2 _ _ _ _ _ _
+      right
+      cases bool_value_from (by assumption) (by assumption)
+      · exists t1
+        grind [Step]
+      · exists t2
+        grind [Step]
+    · rename_i t1 t2 _ _ _ _ _ hs
+      have ⟨ ct', _ ⟩ := hs
+      right
+      exists (.ite ct' t1 t2)
+      grind [Step]
+  · grind [Value, NatValue]
+  · rename_i ih
+    cases ih h
+    · cases nat_value_from (by assumption) (by assumption)
+      · grind [Value, NatValue]
+      · grind [Value, NatValue]
+    · rename_i hs
+      have ⟨ t', _ ⟩ := hs
+      right
+      exists (.Succ t')
+      grind [Step]
+  · rename_i ih
+    cases ih h
+    · cases nat_value_from (by assumption) (by assumption)
+      · right
+        exists .Zero
+        grind [Step]
+      · rename_i t _ _ _
+        right
+        exists t
+        grind [Step]
+    · rename_i hs
+      have ⟨ t', _ ⟩ := hs
+      right
+      exists (.Pred t')
+      grind [Step]
+  · rename_i ht ih
+    cases ih h
+    · rename_i hv
+      have nv := nat_value_from (by assumption) hv
+      right
+      cases nv
+      · exists .trueT
+        grind [Step]
+      · exists .falseT
+        grind [Step]
+    · rename_i hs
+      have ⟨ t', _ ⟩ := hs
+      right
+      exists (.IsZero t')
+      grind [Step]
