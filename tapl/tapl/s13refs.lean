@@ -1,4 +1,5 @@
 import Mathlib.Tactic.Basic
+import Batteries.Tactic.Init
 
 inductive type
 | unit
@@ -240,43 +241,20 @@ lemma styp_set (v : ValueTerm) :
   STyp Γ C μ → C.types l T → Typ Γ C v T →
   STyp Γ C (μ.set l v) := by grind [STyp]
 
+-- most of the goals are similar, can be automated with increased limits
+set_option maxHeartbeats 1000000
 theorem preservation (Γ : TCtx) (C : STCtx) (tp : type) :
   Step s s' → Types Γ C s tp →
   ∃ C', Types Γ C' s' tp ∧ C <+: C' := by
     intro hs ht
     induction hs generalizing tp
-    · rename_i ih
-      rcases ht with ⟨ typ, styp ⟩
-      cases typ
-      rcases ih _ ⟨ by assumption, by assumption ⟩ with ⟨ C', ⟨ _, _ ⟩, hpref ⟩
-      exists C'
-      grind [Typ, stctx_type_weakening]
-    · rename_i ih
-      rcases ht with ⟨ typ, styp ⟩
-      cases typ
-      rcases ih _ ⟨ by assumption, by assumption ⟩ with ⟨ C', ⟨ _, _ ⟩, hpref ⟩
-      exists C'
-      repeat constructor <;> try assumption
-      apply stctx_type_weakening
-      repeat assumption
-    · rename_i t s tp _
-      rcases ht with ⟨ typ, styp ⟩
-      cases typ
-      rename_i ta
-      cases ta
-      rename_i stp _ _ _
-      exists C
-      have _ := betar_preservation (C := C) t s stp tp Γ []
-      grind
-    · rcases ht with ⟨ typ, styp ⟩
+    all_goals try
+    { rcases ht with ⟨ typ, styp ⟩
       cases typ
       exists C
-      grind
-    · rcases ht with ⟨ typ, styp ⟩
-      cases typ
-      exists C
-      grind
-    · rename_i ih
+      grind [Typ, styp_set] }
+    all_goals try
+    { rename_i ih
       rcases ht with ⟨ typ, styp ⟩
       cases typ
       rcases ih _ ⟨ by assumption, by assumption ⟩ with ⟨ C', ⟨ _, _ ⟩, hpref ⟩
@@ -284,170 +262,119 @@ theorem preservation (Γ : TCtx) (C : STCtx) (tp : type) :
       repeat constructor <;> try assumption
       all_goals (
         apply stctx_type_weakening
-        repeat assumption
-      )
-    · rename_i ih
+        repeat assumption) }
+    { rename_i t s tp _
       rcases ht with ⟨ typ, styp ⟩
       cases typ
-      rcases ih _ ⟨ by assumption, by assumption ⟩ with ⟨ C', ⟨ _, _ ⟩, hpref ⟩
-      exists C'
-      repeat constructor <;> try assumption
-    · rename_i ih
-      rcases ht with ⟨ typ, styp ⟩
-      cases typ
-      rcases ih _ ⟨ by assumption, by assumption ⟩ with ⟨ C', ⟨ _, _ ⟩, hpref ⟩
-      exists C'
-      repeat constructor <;> try assumption
-    · rcases ht with ⟨ typ, styp ⟩
-      cases typ
+      rename_i ta
+      cases ta
+      rename_i stp _ _ _
       exists C
-      grind
-    · rcases ht with ⟨ typ, styp ⟩
-      cases typ
-      rename_i ntyp
-      cases ntyp
-      exists C
-      grind
-    · exists C
-      grind [Typ]
-    · exists C
-      grind [Typ]
-    · rename_i ih
-      rcases ht with ⟨ typ, styp ⟩
-      cases typ
-      rcases ih _ ⟨ by assumption, by assumption ⟩ with ⟨ C', ⟨ _, _ ⟩, hpref ⟩
-      exists C'
-      repeat constructor <;> try assumption
-    · rename_i ih
-      rcases ht with ⟨ typ, styp ⟩
-      cases typ
-      rcases ih _ ⟨ by assumption, by assumption ⟩ with ⟨ C', ⟨ _, _ ⟩, hpref ⟩
-      exists C'
-      repeat constructor <;> try assumption
-    · rename_i ih
-      rcases ht with ⟨ typ, styp ⟩
-      cases typ
-      rcases ih _ ⟨ by assumption, by assumption ⟩ with ⟨ C', ⟨ _, _ ⟩, hpref ⟩
-      exists C'
-      repeat constructor <;> try assumption
-    · rename_i ih
-      rcases ht with ⟨ typ, styp ⟩
-      cases typ
-      rcases ih _ ⟨ by assumption, by assumption ⟩ with ⟨ C', ⟨ _, _ ⟩, hpref ⟩
-      exact ⟨ C', by grind [Typ, stctx_type_weakening] ⟩
-    · rename_i ih
-      rcases ht with ⟨ typ, styp ⟩
-      cases typ
-      rcases ih _ ⟨ by assumption, by assumption ⟩ with ⟨ C', ⟨ _, _ ⟩, hpref ⟩
-      exact ⟨ C', by
-        repeat constructor <;> try assumption
-        apply stctx_type_weakening
-        repeat assumption
-      ⟩
-    · exists C
-      grind [Typ, styp_set]
+      have _ := betar_preservation (C := C) t s stp tp Γ []
+      grind }
 
-lemma weakening (t : Term) (tp : type) (Γ Γ₁ : TCtx) :
-  Typ Γ t S → Typ (Γ ++ Γ₁) t tp := by
-    intro ht
-    induction ht <;> grind [Typ]
+lemma nat_value_from (ht : Typ Γ C t type.nat) (hv : Value t) : NatValue t := by
+  cases ht <;> cases hv <;> grind
 
-lemma nat_value_from (ht : Typ Γ t type.nat) (hv : Value t) : NatValue t := by
-  cases ht <;> cases hv
-  · contradiction
-  · contradiction
-  · contradiction
-  · grind
-  · grind
-  · contradiction
-
-lemma bool_value_from (ht : Typ Γ t type.boolean) (hv : Value t) :
-  t = .trueT ∨ t = .falseT := by
-  cases ht <;> cases hv
-  all_goals (try contradiction)
-  · grind
-  · grind
-
-theorem progress (t : Term) (td : Typ [] t T) :
-  Value t ∨ ∃ t', Step t t' := by
-  generalize h : [] = Γ at td
-  induction td
-  · grind [Value]
-  · grind [Value]
-  · grind
-  · grind [Value]
-  · rename_i ht _ ih1 ih2
-    cases ih1 h
-    · rename_i hv
-      cases ht <;> cases hv
-      all_goals (try contradiction)
-      cases ih2 h
-      · rename_i t2 _ _ _ _ t _ _
-        right
-        exists subst t t2
-        grind [Step]
-      · rename_i tp _ _ t _ hs
-        have ⟨ t2', _ ⟩ := hs
-        right
-        exists (t.Abs tp).App t2'
-        grind [Step]
-    · rename_i t2 _ _ _ _ hs
-      have ⟨ t1', _ ⟩ := hs
-      right
-      exists (.App t1' t2)
-      grind [Step]
-  · rename_i ihc iht ihe
-    cases ihc h
-    · rename_i t1 t2 _ _ _ _ _ _
-      right
-      cases bool_value_from (by assumption) (by assumption)
-      · exists t1
-        grind [Step]
-      · exists t2
-        grind [Step]
-    · rename_i t1 t2 _ _ _ _ _ hs
-      have ⟨ ct', _ ⟩ := hs
-      right
-      exists (.ite ct' t1 t2)
-      grind [Step]
-  · grind [Value, NatValue]
-  · rename_i ih
-    cases ih h
-    · cases nat_value_from (by assumption) (by assumption)
-      · grind [Value, NatValue]
-      · grind [Value, NatValue]
-    · rename_i hs
-      have ⟨ t', _ ⟩ := hs
-      right
-      exists (.Succ t')
-      grind [Step]
-  · rename_i ih
-    cases ih h
-    · cases nat_value_from (by assumption) (by assumption)
-      · right
-        exists .Zero
-        grind [Step]
-      · rename_i t _ _ _
-        right
-        exists t
-        grind [Step]
-    · rename_i hs
-      have ⟨ t', _ ⟩ := hs
-      right
-      exists (.Pred t')
-      grind [Step]
-  · rename_i ht ih
-    cases ih h
-    · rename_i hv
-      have nv := nat_value_from (by assumption) hv
-      right
-      cases nv
-      · exists .trueT
-        grind [Step]
-      · exists .falseT
-        grind [Step]
-    · rename_i hs
-      have ⟨ t', _ ⟩ := hs
-      right
-      exists (.IsZero t')
-      grind [Step]
+theorem progress (t : Term) (s : Store) (tp : type) (ht : Types [] C ⟨t, s⟩ tp) :
+  Value t ∨ ∃ t', Step ⟨t, s⟩ t' := by
+  rcases ht with ⟨ht, hst⟩
+  rcases hst with ⟨hl, hg⟩
+  generalize h : [] = Γ at ht
+  unhygienic induction ht
+  { grind [Value] }
+  { grind [Value] }
+  { grind [Value] }
+  { grind [Value] }
+  { right
+    unhygienic cases a_ih (by grind) (by grind) h
+    { unhygienic cases a_ih_1 (by grind) (by grind) h
+      { cases a <;> try grind [Value, NatValue]
+        eapply Exists.intro
+        apply Step.Beta <;> solve_by_elim }
+      cases h_2
+      eapply Exists.intro
+      apply Step.AppR <;> solve_by_elim }
+    cases h_1
+    eapply Exists.intro
+    apply Step.AppL <;> solve_by_elim }
+  { right
+    unhygienic cases a_ih (by grind) (by grind) h
+    { cases h_1
+      { cases a }
+      { eapply Exists.intro
+        apply Step.IteTrue }
+      { eapply Exists.intro
+        apply Step.IteFalse }
+      { cases a <;> grind [NatValue] }
+      { cases a }
+      cases a }
+    rcases h_1
+    eapply Exists.intro
+    apply Step.IteCond
+    solve_by_elim }
+  { grind [Value, NatValue] }
+  { unhygienic cases a_ih (by grind) (by grind) h
+    { have val_lemma := nat_value_from a h_1
+      grind [Value, NatValue] }
+    right
+    cases h_1
+    eapply Exists.intro
+    apply Step.Succ
+    solve_by_elim }
+  { right
+    unhygienic cases a_ih (by grind) (by grind) h
+    { have val_lemma := nat_value_from a h_1
+      cases val_lemma
+      { eapply Exists.intro
+        apply Step.PredZero }
+      eapply Exists.intro
+      apply Step.PredSucc <;> grind }
+    cases h_1
+    eapply Exists.intro
+    apply Step.Pred
+    solve_by_elim }
+  { right
+    unhygienic cases a_ih (by grind) (by grind) h
+    { have val_lemma := nat_value_from a h_1
+      cases val_lemma
+      { eapply Exists.intro
+        apply Step.IsZeroZero }
+      eapply Exists.intro
+      apply Step.IsZeroSucc <;> grind }
+    cases h_1
+    eapply Exists.intro
+    apply Step.IsZero
+    solve_by_elim }
+  { grind [Value] }
+  { unhygienic cases a_ih (by grind) (by grind) h
+    { -- Ref should be a value?
+      sorry }
+    right
+    cases h_1
+    eapply Exists.intro
+    apply Step.Ref
+    solve_by_elim }
+  { right
+    unhygienic cases a_ih (by grind) (by grind) h
+    { cases a <;> try grind [Value, NatValue]
+      -- need deref step rule
+      sorry }
+    cases h_1
+    eapply Exists.intro
+    apply Step.Deref
+    solve_by_elim }
+  { right
+    unhygienic cases a_ih (by grind) (by grind) h
+    { cases a <;> try grind [Value, NatValue]
+      unhygienic cases a_ih_1 (by grind) (by grind) h
+      { eapply Exists.intro
+        apply Step.Assign <;> grind }
+      cases h_2
+      eapply Exists.intro
+      apply Step.AssignR <;> solve_by_elim }
+    cases h_1
+    eapply Exists.intro
+    apply Step.AssignL
+    solve_by_elim }
+  grind [Value]
