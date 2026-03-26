@@ -1,6 +1,7 @@
 import Mathlib.Tactic.Basic
 import Batteries.Tactic.Init
 
+namespace Refs
 inductive type
 | unit
 | boolean
@@ -139,6 +140,9 @@ abbrev Store := List ValueTerm
 @[simp, grind]
 def Store.contains (μ : Store) (l : Nat) : Prop := μ.length > l
 
+@[simp, grind]
+def Store.stores (μ : Store) (l : Nat) (v : ValueTerm) : Prop := μ[l]? = some v
+
 inductive Step : Term × Store → Term × Store → Prop
 | AppL (t t' s : Term) :
   Step (t, μ) (t', μ') →
@@ -179,9 +183,14 @@ inductive Step : Term × Store → Term × Store → Prop
 | Ref (t t' : Term) :
   Step (t, μ) (t', μ') →
   Step (.Ref t, μ) (.Ref t', μ')
+| RefVal (v : ValueTerm) :
+  Step (.Ref v.val, μ) (.Loc μ.length, μ ++ [v])
 | Deref (t t' : Term) :
   Step (t, μ) (t', μ') →
   Step (.Deref t, μ) (.Deref t', μ')
+| DerefLoc (l : Nat) (v : ValueTerm) :
+  μ.stores l v →
+  Step (.Deref (.Loc l), μ) (v.val, μ)
 | AssignL (t₁ t₁' t₂ : Term) :
   Step (t₁, μ) (t₁', μ') →
   Step (.Assign t₁ t₂, μ) (.Assign t₁' t₂, μ')
@@ -190,7 +199,7 @@ inductive Step : Term × Store → Term × Store → Prop
   Step (t₂, μ) (t₂', μ') →
   Step (.Assign t₁ t₂, μ) (.Assign t₁ t₂', μ')
 | Assign (l : Nat) (t : Term) (μ : Store) :
-  (hv : Value t) → Store.contains μ l →
+  (hv : Value t) → μ.contains l →
   Step (.Assign (.Loc l) t, μ) (.UnitT, μ.set l ⟨ t, hv ⟩)
 
 lemma beta_typ (tp S : type) (s : Term) :
@@ -241,13 +250,37 @@ lemma styp_set (v : ValueTerm) :
   STyp Γ C μ → C.types l T → Typ Γ C v T →
   STyp Γ C (μ.set l v) := by grind [STyp]
 
+set_option maxHeartbeats 1000000 in
 -- most of the goals are similar, can be automated with increased limits
-set_option maxHeartbeats 1000000
 theorem preservation (Γ : TCtx) (C : STCtx) (tp : type) :
   Step s s' → Types Γ C s tp →
   ∃ C', Types Γ C' s' tp ∧ C <+: C' := by
     intro hs ht
     induction hs generalizing tp
+    case RefVal =>
+      rcases ht with ⟨ typ, styp ⟩
+      cases typ
+      rcases styp with ⟨ hl, htp ⟩
+      rename_i μ _ tp _
+      exists C ++ [tp]
+      all_goals (repeat constructor <;> try grind)
+      intro l tp' _
+      by_cases hl' : l = μ.length
+      · grind [stctx_type_weakening]
+      · have _ := htp l tp' (by grind)
+        grind [stctx_type_weakening]
+    case DerefLoc =>
+      rcases ht with ⟨ typ, styp ⟩
+      cases typ
+      rcases styp with ⟨ hl, htp ⟩
+      rename_i μ _ _ tp typ
+      cases typ
+      exists C
+      constructor
+      · constructor
+        · grind
+        · constructor <;> assumption
+      · grind
     all_goals try
     { rcases ht with ⟨ typ, styp ⟩
       cases typ
@@ -348,8 +381,15 @@ theorem progress (t : Term) (s : Store) (tp : type) (ht : Types [] C ⟨t, s⟩ 
     solve_by_elim }
   { grind [Value] }
   { unhygienic cases a_ih (by grind) (by grind) h
-    { -- Ref should be a value?
-      sorry }
+    {
+      right
+      let v : ValueTerm := ⟨ t_1, by assumption ⟩
+      exists ⟨.Loc s.length, s ++ [v]⟩
+      -- WTF, why do I have to do this?
+      have h : t_1.Ref = v.val.Ref := by rfl
+      rw [h]
+      apply Step.RefVal
+    }
     right
     cases h_1
     eapply Exists.intro
@@ -357,9 +397,9 @@ theorem progress (t : Term) (s : Store) (tp : type) (ht : Types [] C ⟨t, s⟩ 
     solve_by_elim }
   { right
     unhygienic cases a_ih (by grind) (by grind) h
-    { cases a <;> try grind [Value, NatValue]
-      -- need deref step rule
-      sorry }
+    { unhygienic cases a <;> try grind [Value, NatValue]
+      exists ⟨ s.get ⟨ l, by grind ⟩ , s ⟩
+      grind [Step] }
     cases h_1
     eapply Exists.intro
     apply Step.Deref
@@ -378,3 +418,4 @@ theorem progress (t : Term) (s : Store) (tp : type) (ht : Types [] C ⟨t, s⟩ 
     apply Step.AssignL
     solve_by_elim }
   grind [Value]
+end Refs
