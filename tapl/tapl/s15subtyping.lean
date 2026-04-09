@@ -6,8 +6,6 @@ namespace Subtyping
 
 abbrev Label := String
 
-#check List.Nodup
-
 structure SList (α : Type*) [DecidableEq α] [Inhabited α] where
   elems : List α
   nodup : elems.Nodup
@@ -23,6 +21,20 @@ inductive type
 | rcd (tps : List type) (tpl : SList Label)
 | top
 deriving Inhabited
+
+/-
+inductive subt : type → type → Prop
+| Refl (s : type) : subt s s
+| Trans (s u v : type) :
+  subt s u →
+  subt u v →
+  subt s v
+| Top (s : type) : subt s (.top)
+| Arrow (s1 s2 t1 t2 : type) :
+  subt t1 s1 →
+  subt s2 t2 →
+  subt (.arr s1 s2) (.arr t1 t2)
+-/
 
 inductive Term
 | trueT : Term
@@ -110,7 +122,11 @@ inductive Typ : TCtx → Term → type → Prop
   tp = tps[i]! →
   i < tps.length →
   Typ Γ (.Proj t l) tp
-
+/-| TSub (t : Term) (S T : type) (Γ : TCtx):
+  Typ Γ t S →
+  subt S T →
+  Typ Γ t T
+-/
 
 def shift_up_from (c : Nat) : Term → Term
 | .Zero => .Zero
@@ -211,6 +227,7 @@ inductive Step : Term → Term → Prop
   Step (.Proj t l) (.Proj t' l)
 | ProjRcd (tpt : List Term) (tpl : SList Label) (k : Nat) :
   -- we can do a step under index even if we have duplicates?
+  Value (.Rcd tpt tpl) →
   k < tpl.elems.length →
   k < tpt.length →
   Step (.Proj (.Rcd tpt tpl) tpl.elems[k]!) tpt[k]!
@@ -235,6 +252,37 @@ lemma betar_preservation (t s : Term) (S T : type) (Γ Γ₁ : TCtx) :
         grind)
       grind }
     all_goals { grind [betar, Typ] }
+/-
+lemma subt_eq (s t : type) : subt s t →
+  t = .top ∨ t = s ∨ (∃ s1 s2 t1 t2,
+  subt t1 s1 ∧
+  subt s2 t2 ∧
+  s = (.arr s1 s2) ∧ t = (.arr t1 t2)) := by
+    intro h
+    induction h
+    { grind }
+    { rename_i s u v hs hu ihs ihu
+      cases u <;> try grind
+      cases ihs
+      { grind }
+      rename_i h1
+      cases h1
+      { grind }
+      rename_i h1
+      rcases h1 with ⟨s1, s2, t1, t2, hs, ht, hp⟩
+      rw [hp.1]
+      cases v <;> try grind
+      cases ihu
+      { grind }
+      rename_i h1
+      cases h1
+      { grind }
+      rename_i h1
+      rcases h1 with ⟨s3, s4, t3, t4, hs1, ht1, hp1⟩
+      grind [subt] }
+    { grind }
+    { grind }
+-/
 
 theorem preservation (t t' : Term) (tp : type) (Γ : TCtx) :
   Step t t' → Typ Γ t tp → Typ Γ t' tp := by
@@ -382,7 +430,7 @@ theorem progress (t : Term) (td : Typ [] t T) :
     rcases exi with ⟨j, hj, hq⟩
     exists tpt1[j]!
     rw [htp, ←hq]
-    apply Step.ProjRcd tpt1 <;> grind }
+    apply Step.ProjRcd tpt1 <;> grind [Value] }
   unhygienic cases h1
   exists w.Proj l
   apply Step.Proj
