@@ -381,14 +381,10 @@ theorem progress (t : Term) (s : Store) (tp : type) (ht : Types [] C ⟨t, s⟩ 
     solve_by_elim }
   { grind [Value] }
   { unhygienic cases a_ih (by grind) (by grind) h
-    {
-      right
+    { right
       let v : ValueTerm := ⟨ t_1, by assumption ⟩
       exists ⟨.Loc s.length, s ++ [v]⟩
-      -- WTF, why do I have to do this?
-      have h : t_1.Ref = v.val.Ref := by rfl
-      rw [h]
-      apply Step.RefVal
+      apply Step.RefVal (v := v)
     }
     right
     cases h_1
