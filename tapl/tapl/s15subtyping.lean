@@ -1,17 +1,25 @@
 import Mathlib.Tactic.Basic
 import Mathlib.Data.Set.Basic
 import Mathlib.Data.List.AList
+import Mathlib.Data.List.Induction
 
 namespace Subtyping
 
 abbrev Label := String
 
-structure SList (α : Type*) [DecidableEq α] [Inhabited α] where
+@[grind]
+structure SList (α : Type*) [DecidableEq α] where
   elems : List α
   nodup : elems.Nodup
 
+def SList.length [DecidableEq α] (s : SList α) : Nat := s.elems.length
 
-instance (α : Type*) [DecidableEq α] [Inhabited α] : Inhabited (SList α) where
+@[grind]
+def SList.assoc [DecidableEq α]
+  (s : SList α) (a : α) (e : List β) (b : β) : Prop :=
+  ∃ i < s.length, s.elems[i]? = some a ∧ e[i]? = some b
+
+instance (α : Type*) [DecidableEq α] : Inhabited (SList α) where
   default := ⟨[], by simp⟩
 
 inductive type
@@ -61,6 +69,7 @@ inductive Value : Term → Prop
 | falseV : Value .falseT
 | NatV (t : Term) : NatValue t → Value t
 | RcdV (tpt : List Term) (tpl : SList Label) :
+  tpl.length = tpt.length →
   (∀ i < tpt.length, Value tpt[i]!) →
   Value (Term.Rcd tpt tpl)
 
@@ -106,21 +115,15 @@ inductive Typ : TCtx → Term → type → Prop
 | TIsZero (t : Term) (Γ : TCtx) :
   Typ Γ t type.nat →
   Typ Γ (.IsZero t) type.boolean
-| TRcd (tpt : List Term) (Γ : TCtx) (tpl₁ tpl₂ : SList Label) (tps : List type) :
-  -- is there a way to do this better?
-  tpt.length = tpl₁.elems.length →
-  tpl₁.elems.Perm tpl₂.elems →
-  tps.length = tpl₂.elems.length →
-  (∀ i j, i < tpl₁.elems.length → j < tpl₂.elems.length → tpl₁.elems[i]! = tpl₂.elems[j]! →
-    Typ Γ tpt[i]! tps[j]!) →
-  Typ Γ (.Rcd tpt tpl₁) (.rcd tps tpl₂)
-| TProj (t : Term) (l : Label) (Γ : TCtx)
-  (tpl : SList Label) (tps : List type) (i : Nat) (tp : type) :
-  -- we can do a step under index even if we have duplicates?
+| TRcd (terms: List Term) (labels : SList Label) (Γ : TCtx) (tps : List type) :
+  labels.length = tps.length →
+  labels.length = terms.length →
+  (∀ i < terms.length, Typ Γ terms[i]! tps[i]!) →
+  Typ Γ (.Rcd terms labels) (.rcd tps labels)
+| TProj (t : Term) (l : Label) (tpl : SList Label)
+        (Γ : TCtx)  (tps : List type) (tp : type) :
   Typ Γ t (.rcd tps tpl) →
-  l = tpl.elems[i]! →
-  tp = tps[i]! →
-  i < tps.length →
+  tpl.assoc l tps tp →
   Typ Γ (.Proj t l) tp
 /-| TSub (t : Term) (S T : type) (Γ : TCtx):
   Typ Γ t S →
@@ -220,17 +223,16 @@ inductive Step : Term → Term → Prop
   Step t t' →
   Step (.IsZero t) (.IsZero t')
 | Rcd (tpt : List Term) (tpl : SList Label) (t : Term) (i : Nat) :
+  (∀ j < i, Value tpt[j]!) →
   Step tpt[i]! t →
   Step (.Rcd tpt tpl) (.Rcd (tpt.set i t) tpl)
 | Proj (t t' : Term) (l : Label) :
   Step t t' →
   Step (.Proj t l) (.Proj t' l)
-| ProjRcd (tpt : List Term) (tpl : SList Label) (k : Nat) :
-  -- we can do a step under index even if we have duplicates?
+| ProjRcd (tpt : List Term) (tpl : SList Label) (l : Label)(t : Term) :
   Value (.Rcd tpt tpl) →
-  k < tpl.elems.length →
-  k < tpt.length →
-  Step (.Proj (.Rcd tpt tpl) tpl.elems[k]!) tpt[k]!
+  tpl.assoc l tpt t →
+  Step (.Proj (.Rcd tpt tpl) l) t
 
 lemma beta_typ (tp : type) (S : type) :
   Γ₂ = Γ₁ ++ Γ → Typ Γ₂ s S → Typ (Γ₁ ++ tp :: Γ) (shift_up_from Γ₁.length s) S := by
@@ -288,14 +290,19 @@ theorem preservation (t t' : Term) (tp : type) (Γ : TCtx) :
   Step t t' → Typ Γ t tp → Typ Γ t' tp := by
     intro hs ht
     unhygienic induction hs generalizing Γ tp
-    iterate 2 { grind [Typ] }
-    { unhygienic cases ht
+    case Beta =>
+      unhygienic cases ht
       unhygienic cases a_1
       rename_i tp1
       have lm := betar_preservation t_1 s tp1 tp Γ [] (Γ₂ := tp1 :: Γ)
-      grind }
-    iterate 12 { grind [Typ] }
-    grind [Typ]
+      grind
+    case Rcd =>
+      unhygienic cases ht
+      -- lol why grind can't solve it
+      grind [Typ.TRcd]
+    case ProjRcd =>
+      grind [List.Nodup.getElem_inj_iff, Typ]
+    repeat grind [Typ]
 
 lemma nat_value_from (ht : Typ Γ t type.nat) (hv : Value t) : NatValue t := by
   cases ht <;> cases hv <;> grind
@@ -306,6 +313,27 @@ lemma bool_value_from (ht : Typ Γ t type.boolean) (hv : Value t) :
   all_goals (try contradiction)
   · grind
   · grind
+
+lemma rcd_value_from (tpl : SList Label) (tps : List type)
+  (ht : Typ Γ t (.rcd tps tpl)) (hv : Value t) :
+  ∃ tpt, t = .Rcd tpt tpl ∧ tpt.length = tps.length ∧
+  (∀ i < tps.length, Typ Γ tpt[i]! tps[i]! ∧ Value tpt[i]!) := by
+  cases ht <;> cases hv
+  all_goals (try contradiction)
+  grind
+
+lemma p_prefix [Inhabited α] {P : α → Prop} (ls : List α) (h : ∃ i < ls.length, ¬P ls[i]!) :
+  ∃ i < ls.length, ¬P ls[i]! ∧ ∀ j < i, P ls[j]! := by
+  induction ls using List.reverseRecOn
+  · grind
+  · rename_i p a ih
+    by_cases hp : ∃ j < p.length, ¬P p[j]!
+    · apply ih at hp
+      have ⟨ i, _ ⟩ := hp
+      exists i
+      grind
+    · grind
+
 theorem progress (t : Term) (td : Typ [] t T) :
   Value t ∨ ∃ t', Step t t' := by
   generalize h : [] = Γ at td
@@ -394,45 +422,30 @@ theorem progress (t : Term) (td : Typ [] t T) :
       right
       exists (.IsZero t')
       solve_by_elim
-  { rename_i tpt _ tpl₁ tpl₂ tps hl1 hl2 hls hd ih
-    by_cases ha : ∀ i < tpt.length, Value tpt[i]!
-    { left
-      apply Value.RcdV
-      solve_by_elim }
-    right
-    simp only [not_forall] at ha
-    rcases ha with ⟨i, ht, htv⟩
-    have ex2 : ∃ j < tpt.length, tpl₁.elems[i]! = tpl₂.elems[j]! := by
-      have : tpt.length = tpl₂.elems.length := by
-        grind [hl2.length_eq]
-      rw [this]
-      rcases SList.Perm.key_correspondence tpl₁ tpl₂ (by grind) ⟨i, by grind⟩ with ⟨j, hj⟩
-      simp at hj
-      grind
-    rcases ex2 with ⟨j, hj⟩
-    cases ih i j (by grind) (by grind [hl2.length_eq]) (by grind) h
-    { grind }
-    rename_i ht
-    rcases ht with ⟨t1, ht1⟩
-    exists Term.Rcd (tpt.set i t1) tpl₁
-    solve_by_elim }
-  right
-  rename_i l _ tpl tps i tp tp₁ htp hk heq ih
-  cases ih h <;> rename_i h1
-  { cases h1
-    iterate 4 grind [Typ, NatValue]
-    rename_i tpt1 tpl1 hv
-    cases tp₁
-    have exi : ∃ j < tpt1.length, tpl1.elems[j]! = tpl.elems[i]! := by
-      rename_i ht1 hsl ht2 ht
-      have := SList.Perm.key_correspondence tpl tpl1 (by grind) ⟨i, by grind⟩
-      grind
-    rcases exi with ⟨j, hj, hq⟩
-    exists tpt1[j]!
-    rw [htp, ←hq]
-    apply Step.ProjRcd tpt1 <;> grind [Value] }
-  unhygienic cases h1
-  exists w.Proj l
-  apply Step.Proj
-  apply h_1
+  · rename_i tpt tpl _ tps h1 h2 hl ih
+    by_cases hv : ∀ i < tpt.length, Value tpt[i]!
+    · left
+      grind [Value]
+    · have ⟨ i, hi, hnv, hvs ⟩ : ∃ i < tpt.length,
+            ¬Value tpt[i]! ∧ ∀ j < i, Value tpt[j]! := by
+        apply p_prefix
+        grind
+      have ⟨ t', _ ⟩ : ∃ t', Step tpt[i]! t' := by grind
+      right
+      exists (.Rcd (tpt.set i t') tpl)
+      grind [Step]
+  · rename_i ih
+    cases ih h
+    · cases rcd_value_from _ _ (by assumption) (by assumption)
+      rename_i ah _ tpt _
+      rcases ah with ⟨ i, _, _, _ ⟩
+      right
+      exists tpt[i]!
+      grind [Step]
+    · rename_i hs
+      have ⟨ t', _ ⟩ := hs
+      right
+      exists (.Proj t' (by assumption))
+      grind [Step]
+
 end Subtyping
