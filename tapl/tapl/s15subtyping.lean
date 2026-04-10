@@ -30,19 +30,17 @@ inductive type
 | top
 deriving Inhabited
 
-/-
-inductive subt : type → type → Prop
-| Refl (s : type) : subt s s
+inductive SubT : type → type → Prop
+| Refl (s : type) : SubT s s
 | Trans (s u v : type) :
-  subt s u →
-  subt u v →
-  subt s v
-| Top (s : type) : subt s (.top)
+  SubT s u →
+  SubT u v →
+  SubT s v
+| Top (s : type) : SubT s (.top)
 | Arrow (s1 s2 t1 t2 : type) :
-  subt t1 s1 →
-  subt s2 t2 →
-  subt (.arr s1 s2) (.arr t1 t2)
--/
+  SubT t1 s1 →
+  SubT s2 t2 →
+  SubT (.arr s1 s2) (.arr t1 t2)
 
 inductive Term
 | trueT : Term
@@ -125,11 +123,10 @@ inductive Typ : TCtx → Term → type → Prop
   Typ Γ t (.rcd tps tpl) →
   tpl.assoc l tps tp →
   Typ Γ (.Proj t l) tp
-/-| TSub (t : Term) (S T : type) (Γ : TCtx):
+| TSub (t : Term) (S T : type) (Γ : TCtx):
   Typ Γ t S →
-  subt S T →
+  SubT S T →
   Typ Γ t T
--/
 
 def shift_up_from (c : Nat) : Term → Term
 | .Zero => .Zero
@@ -286,23 +283,95 @@ lemma subt_eq (s t : type) : subt s t →
     { grind }
 -/
 
+lemma rcd_typ {tpt : List Term} {tps : List type}
+  {tpl1 tpl2 : SList Label} {tp : type}
+  (ht : Typ Γ (.Rcd tpt tpl1) (.rcd tps tpl2))
+  (hts : tpl2.assoc l tps tp) (htt : tpl1.assoc l tpt t) : Typ Γ t tp := by
+  generalize h1 : Term.Rcd tpt tpl1 = t₁ at ht
+  generalize h2 : type.rcd tps tpl2 = tp₁ at ht
+  induction ht
+  all_goals (try contradiction)
+  · grind [List.Nodup.getElem_inj_iff]
+  · rename_i sh ih
+    induction sh <;> grind [Typ]
+
+lemma arr_subt (sh : SubT S T) (h : t₁.arr t₂ = T) :
+  ∃ s₁ s₂, SubT t₁ s₁ ∧ SubT s₂ t₂ ∧ S = (.arr s₁ s₂) := by
+  induction sh generalizing t₁ t₂
+  · grind [SubT]
+  · rename_i ih1 ih2
+    rcases ih2 h with ⟨s₁, s₂, hs1, hs2, hu⟩
+    rcases ih1 hu.symm with ⟨s₃, s₄, hs3, hs4, hp⟩
+    grind [SubT]
+  · contradiction
+  · grind
+
+lemma ctx_subt (sh : SubT s₁ s₂)
+  (ht : Typ (Γ ++ s₂ :: Γ') t T) : Typ (Γ ++ s₁ :: Γ') t T := by
+  generalize h1 : Γ ++ s₂ :: Γ' = Γ₁ at ht
+  induction ht generalizing Γ
+  all_goals (try grind [Typ])
+  · rename_i x _ tp htyp
+    by_cases h : x = Γ.length
+    · have he : tp = s₂ := by grind
+      apply Typ.TSub (S := s₁)
+      · grind [Typ]
+      · grind
+    · grind [Typ]
+
+lemma abs_typ {tp tp₁ tp₂ : type}
+  (h : Typ Γ (t.Abs tp) (tp₁.arr tp₂)) :
+  Typ (tp₁ :: Γ) t tp₂ := by
+  generalize h1 : t.Abs tp = t' at h
+  generalize h2 : tp₁.arr tp₂ = tp' at h
+  induction h generalizing tp₁ tp₂
+  all_goals (try contradiction)
+  · grind [Typ]
+  · rename_i ih
+    rcases arr_subt (by assumption) (by assumption) with ⟨s₁, s₂, hs1, hs2, hp⟩
+    have _ := ih h1 hp.symm
+    apply Typ.TSub
+    · apply ctx_subt (Γ := [])
+      · assumption
+      · assumption
+    · assumption
+
 theorem preservation (t t' : Term) (tp : type) (Γ : TCtx) :
   Step t t' → Typ Γ t tp → Typ Γ t' tp := by
     intro hs ht
-    unhygienic induction hs generalizing Γ tp
-    case Beta =>
-      unhygienic cases ht
-      unhygienic cases a_1
-      rename_i tp1
-      have lm := betar_preservation t_1 s tp1 tp Γ [] (Γ₂ := tp1 :: Γ)
-      grind
-    case Rcd =>
-      unhygienic cases ht
-      -- lol why grind can't solve it
-      grind [Typ.TRcd]
-    case ProjRcd =>
-      grind [List.Nodup.getElem_inj_iff, Typ]
-    repeat grind [Typ]
+    induction ht generalizing t'
+    · grind [Step]
+    · grind [Step]
+    · grind [Step]
+    · grind [Step]
+    · cases hs
+      · grind [Typ]
+      · grind [Typ]
+      · apply betar_preservation (Γ₁ := [])
+        · rfl
+        · assumption
+        · apply abs_typ
+          · assumption
+    · cases hs <;> grind [Typ]
+    · grind [Step]
+    · cases hs
+      grind [Typ]
+    · cases hs
+      · grind [Typ]
+      · grind [Typ]
+      · rename_i nv _ _
+        clear * - nv
+        induction nv
+        · constructor
+        · constructor
+          assumption
+    · cases hs
+      repeat grind [Typ]
+    · cases hs
+      constructor
+      repeat grind
+    · cases hs <;> grind [Typ, rcd_typ]
+    · grind [Step, Typ]
 
 lemma nat_value_from (ht : Typ Γ t type.nat) (hv : Value t) : NatValue t := by
   cases ht <;> cases hv <;> grind
