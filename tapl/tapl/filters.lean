@@ -123,6 +123,32 @@ inductive TypeAssgn : Basis → TypeScheme → Term → Prop
   TypeAssgn B tsa t2 →
   TypeAssgn B tsr (t1.App t2)
 
+abbrev TypeInt (D : Type) := Nat → Set D
+
+def type_interpret (model : LambdaModel) (var_int : TypeInt model.D) :
+  TypeScheme → Set model.D
+| .var (i : Nat) =>
+  var_int i
+| .arrow (σ : TypeScheme) (τ : TypeScheme) =>
+  fun d : model.D =>
+    ∀ e ∈ type_interpret model var_int σ, model.app d e ∈ type_interpret model var_int τ
+
+
+def LambdaRelTyp (model : LambdaModel) (interp : VarInt model.D n)
+  (type_interp : TypeInt model.D) (t : TermFV n) (ty : TypeScheme) : Prop :=
+  model.int t interp ∈ type_interpret model type_interp ty
+
+--is it B.length or n?
+def LambdaRelBase (model : LambdaModel) (B : Basis) (interp : VarInt model.D B.length)
+  (type_interp : TypeInt model.D) : Prop :=
+  ∀ x, (hx : x < B.length) →
+    LambdaRelTyp (n := B.length) model interp type_interp (⟨.Var x, FV.Var hx⟩) B[x]
+
+def LambdaRel (B : Basis) (t : TermFV B.length) (σ : TypeScheme) : Prop :=
+  ∀ (model : LambdaModel) (interp : VarInt model.D B.length) (type_interp : TypeInt model.D),
+    LambdaRelBase model B interp type_interp →
+    LambdaRelTyp model interp type_interp t σ
+
 end Curry
 
 end FilterModel
