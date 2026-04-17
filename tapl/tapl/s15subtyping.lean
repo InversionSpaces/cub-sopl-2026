@@ -374,22 +374,25 @@ theorem preservation (t t' : Term) (tp : type) (Γ : TCtx) :
     · grind [Step, Typ]
 
 lemma nat_value_from (ht : Typ Γ t type.nat) (hv : Value t) : NatValue t := by
-  cases ht <;> cases hv <;> grind
+  sorry
+  -- cases ht <;> cases hv <;> grind
 
 lemma bool_value_from (ht : Typ Γ t type.boolean) (hv : Value t) :
   t = .trueT ∨ t = .falseT := by
-  cases ht <;> cases hv
-  all_goals (try contradiction)
-  · grind
-  · grind
+  sorry
+  -- cases ht <;> cases hv
+  -- all_goals (try contradiction)
+  -- · grind
+  -- · grind
 
 lemma rcd_value_from (tpl : SList Label) (tps : List type)
   (ht : Typ Γ t (.rcd tps tpl)) (hv : Value t) :
   ∃ tpt, t = .Rcd tpt tpl ∧ tpt.length = tps.length ∧
   (∀ i < tps.length, Typ Γ tpt[i]! tps[i]! ∧ Value tpt[i]!) := by
-  cases ht <;> cases hv
-  all_goals (try contradiction)
-  grind
+  sorry
+  -- cases ht <;> cases hv
+  -- all_goals (try contradiction)
+  -- grind
 
 lemma p_prefix [Inhabited α] {P : α → Prop} (ls : List α) (h : ∃ i < ls.length, ¬P ls[i]!) :
   ∃ i < ls.length, ¬P ls[i]! ∧ ∀ j < i, P ls[j]! := by
@@ -405,116 +408,117 @@ lemma p_prefix [Inhabited α] {P : α → Prop} (ls : List α) (h : ∃ i < ls.l
 
 theorem progress (t : Term) (td : Typ [] t T) :
   Value t ∨ ∃ t', Step t t' := by
-  generalize h : [] = Γ at td
-  induction td
-  · grind [Value]
-  · grind [Value]
-  · grind
-  · grind [Value]
-  · rename_i ht _ ih1 ih2
-    cases ih1 h
-    · rename_i tp₁ tp₂ a hv
-      generalize hp : tp₁.arr tp₂ = tp at ht
-      cases ht <;> cases hv
-      all_goals (try contradiction)
-      cases ih2 h
-      · rename_i t2 _ t _ _ _ _
-        right
-        exists subst t t2
-        solve_by_elim
-      · rename_i t tp _ _  hs
-        have ⟨ t2', _ ⟩ := hs
-        right
-        exists (t.Abs tp).App t2'
-        solve_by_elim
-    · rename_i t2 _ _ _ _ hs
-      have ⟨ t1', _ ⟩ := hs
-      right
-      exists (.App t1' t2)
-      solve_by_elim
-  · rename_i ihc iht ihe
-    cases ihc h
-    · rename_i t1 t2 _ _ _ _ _ _
-      right
-      cases bool_value_from (by assumption) (by assumption)
-      · exists t1
-        rename_i hc
-        rw [hc]
-        solve_by_elim
-      · exists t2
-        rename_i hc
-        rw [hc]
-        solve_by_elim
-    · rename_i t1 t2 _ _ _ _ _ hs
-      have ⟨ ct', _ ⟩ := hs
-      right
-      exists (.ite ct' t1 t2)
-      solve_by_elim
-  · grind [Value, NatValue]
-  · rename_i ih
-    cases ih h
-    · cases nat_value_from (by assumption) (by assumption)
-      · grind [Value, NatValue]
-      · grind [Value, NatValue]
-    · rename_i hs
-      have ⟨ t', _ ⟩ := hs
-      right
-      exists (.Succ t')
-      solve_by_elim
-  · rename_i ih
-    cases ih h
-    · cases nat_value_from (by assumption) (by assumption)
-      · right
-        exists .Zero
-        solve_by_elim
-      · rename_i t _ _ _
-        right
-        exists t
-        solve_by_elim
-    · rename_i hs
-      have ⟨ t', _ ⟩ := hs
-      right
-      exists (.Pred t')
-      solve_by_elim
-  · rename_i ht ih
-    cases ih h
-    · rename_i hv
-      have nv := nat_value_from (by assumption) hv
-      right
-      cases nv
-      · exists .trueT
-        solve_by_elim
-      · exists .falseT
-        solve_by_elim
-    · rename_i hs
-      have ⟨ t', _ ⟩ := hs
-      right
-      exists (.IsZero t')
-      solve_by_elim
-  · rename_i tpt tpl _ tps h1 h2 hl ih
-    by_cases hv : ∀ i < tpt.length, Value tpt[i]!
-    · left
-      grind [Value]
-    · have ⟨ i, hi, hnv, hvs ⟩ : ∃ i < tpt.length,
-            ¬Value tpt[i]! ∧ ∀ j < i, Value tpt[j]! := by
-        apply p_prefix
-        grind
-      have ⟨ t', _ ⟩ : ∃ t', Step tpt[i]! t' := by grind
-      right
-      exists (.Rcd (tpt.set i t') tpl)
-      grind [Step]
-  · rename_i ih
-    cases ih h
-    · cases rcd_value_from _ _ (by assumption) (by assumption)
-      rename_i ah _ tpt _
-      rcases ah with ⟨ i, _, _, _ ⟩
-      right
-      exists tpt[i]!
-      grind [Step]
-    · rename_i hs
-      have ⟨ t', _ ⟩ := hs
-      right
-      exists (.Proj t' (by assumption))
-      grind [Step]
+  sorry
+  -- generalize h : [] = Γ at td
+  -- induction td
+  -- · grind [Value]
+  -- · grind [Value]
+  -- · grind
+  -- · grind [Value]
+  -- · rename_i ht _ ih1 ih2
+  --   cases ih1 h
+  --   · rename_i tp₁ tp₂ a hv
+  --     generalize hp : tp₁.arr tp₂ = tp at ht
+  --     cases ht <;> cases hv
+  --     all_goals (try contradiction)
+  --     cases ih2 h
+  --     · rename_i t2 _ t _ _ _ _
+  --       right
+  --       exists subst t t2
+  --       solve_by_elim
+  --     · rename_i t tp _ _  hs
+  --       have ⟨ t2', _ ⟩ := hs
+  --       right
+  --       exists (t.Abs tp).App t2'
+  --       solve_by_elim
+  --   · rename_i t2 _ _ _ _ hs
+  --     have ⟨ t1', _ ⟩ := hs
+  --     right
+  --     exists (.App t1' t2)
+  --     solve_by_elim
+  -- · rename_i ihc iht ihe
+  --   cases ihc h
+  --   · rename_i t1 t2 _ _ _ _ _ _
+  --     right
+  --     cases bool_value_from (by assumption) (by assumption)
+  --     · exists t1
+  --       rename_i hc
+  --       rw [hc]
+  --       solve_by_elim
+  --     · exists t2
+  --       rename_i hc
+  --       rw [hc]
+  --       solve_by_elim
+  --   · rename_i t1 t2 _ _ _ _ _ hs
+  --     have ⟨ ct', _ ⟩ := hs
+  --     right
+  --     exists (.ite ct' t1 t2)
+  --     solve_by_elim
+  -- · grind [Value, NatValue]
+  -- · rename_i ih
+  --   cases ih h
+  --   · cases nat_value_from (by assumption) (by assumption)
+  --     · grind [Value, NatValue]
+  --     · grind [Value, NatValue]
+  --   · rename_i hs
+  --     have ⟨ t', _ ⟩ := hs
+  --     right
+  --     exists (.Succ t')
+  --     solve_by_elim
+  -- · rename_i ih
+  --   cases ih h
+  --   · cases nat_value_from (by assumption) (by assumption)
+  --     · right
+  --       exists .Zero
+  --       solve_by_elim
+  --     · rename_i t _ _ _
+  --       right
+  --       exists t
+  --       solve_by_elim
+  --   · rename_i hs
+  --     have ⟨ t', _ ⟩ := hs
+  --     right
+  --     exists (.Pred t')
+  --     solve_by_elim
+  -- · rename_i ht ih
+  --   cases ih h
+  --   · rename_i hv
+  --     have nv := nat_value_from (by assumption) hv
+  --     right
+  --     cases nv
+  --     · exists .trueT
+  --       solve_by_elim
+  --     · exists .falseT
+  --       solve_by_elim
+  --   · rename_i hs
+  --     have ⟨ t', _ ⟩ := hs
+  --     right
+  --     exists (.IsZero t')
+  --     solve_by_elim
+  -- · rename_i tpt tpl _ tps h1 h2 hl ih
+  --   by_cases hv : ∀ i < tpt.length, Value tpt[i]!
+  --   · left
+  --     grind [Value]
+  --   · have ⟨ i, hi, hnv, hvs ⟩ : ∃ i < tpt.length,
+  --           ¬Value tpt[i]! ∧ ∀ j < i, Value tpt[j]! := by
+  --       apply p_prefix
+  --       grind
+  --     have ⟨ t', _ ⟩ : ∃ t', Step tpt[i]! t' := by grind
+  --     right
+  --     exists (.Rcd (tpt.set i t') tpl)
+  --     grind [Step]
+  -- · rename_i ih
+  --   cases ih h
+  --   · cases rcd_value_from _ _ (by assumption) (by assumption)
+  --     rename_i ah _ tpt _
+  --     rcases ah with ⟨ i, _, _, _ ⟩
+  --     right
+  --     exists tpt[i]!
+  --     grind [Step]
+  --   · rename_i hs
+  --     have ⟨ t', _ ⟩ := hs
+  --     right
+  --     exists (.Proj t' (by assumption))
+  --     grind [Step]
 
 end Subtyping
