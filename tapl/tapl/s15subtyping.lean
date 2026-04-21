@@ -14,6 +14,12 @@ structure SList (α : Type*) [DecidableEq α] where
 
 def SList.length [DecidableEq α] (s : SList α) : Nat := s.elems.length
 
+def SList.IsPrefix [DecidableEq α] (s t : SList α) : Prop := s.elems.IsPrefix t.elems
+
+def SList.Perm [DecidableEq α] (s t : SList α) : Prop := s.elems.Perm t.elems
+
+def SList.Subperm [DecidableEq α] (s t : SList α) : Prop := s.elems.Subperm t.elems
+
 @[grind]
 def SList.assoc [DecidableEq α]
   (s : SList α) (a : α) (e : List β) (b : β) : Prop :=
@@ -41,6 +47,23 @@ inductive SubT : type → type → Prop
   SubT t1 s1 →
   SubT s2 t2 →
   SubT (.arr s1 s2) (.arr t1 t2)
+| RcdWidth (tpl tpl': SList Label) (tps tps' : List type) :
+  tpl.length = tps.length →
+  tpl'.length = tps'.length →
+  tpl'.IsPrefix tpl →
+  tps'.IsPrefix tps →
+  SubT (.rcd tps tpl) (.rcd tps' tpl')
+| RcdDepth (tpl : SList Label) (tps tps' : List type) :
+  tpl.length = tps.length →
+  tpl.length = tps'.length →
+  (∀ i < tps.length, SubT tps'[i]! tps[i]!) →
+  SubT (.rcd tps' tpl) (.rcd tps tpl)
+| RcdPerm (tpl tpl': SList Label) (tps tps': List type) :
+  tpl.length = tps.length →
+  tpl'.length = tps'.length →
+  (∀ i < tpl.length, ∃ j < tpl'.length,
+    tpl.elems[i]! = tpl'.elems[j]! ∧ tps[i]! = tps'[j]!) →
+  SubT (.rcd tps' tpl') (.rcd tps tpl)
 
 inductive Term
 | trueT : Term
@@ -283,6 +306,27 @@ lemma subt_eq (s t : type) : subt s t →
     { grind }
 -/
 
+lemma inverse_rcd {tpl : SList Label} {tps : List type}
+  (he : tpl.length = tps.length) (hs : SubT T (.rcd tps tpl)) :
+  ∃ tpl' tps', T = (.rcd tps' tpl') ∧ tpl'.length = tps'.length ∧
+     ∀ l tp, tpl.assoc l tps tp → ∃ tp', SubT tp' tp ∧ tpl'.assoc l tps' tp := by
+  generalize h1 : type.rcd tps tpl = T at hs
+  induction hs
+  · cases h1
+    exists tpl
+    exists tps
+    repeat (constructor <;> try assumption)
+    intro l tp ha
+    exists tp
+    grind [SubT]
+  ·
+    sorry
+  · sorry
+  · sorry
+  · sorry
+  · sorry
+  · sorry
+
 lemma rcd_typ {tpt : List Term} {tps : List type}
   {tpl1 tpl2 : SList Label} {tp : type}
   (ht : Typ Γ (.Rcd tpt tpl1) (.rcd tps tpl2))
@@ -292,8 +336,8 @@ lemma rcd_typ {tpt : List Term} {tps : List type}
   induction ht
   all_goals (try contradiction)
   · grind [List.Nodup.getElem_inj_iff]
-  · rename_i sh ih
-    induction sh <;> grind [Typ]
+  · -- dunno what to do here
+    sorry
 
 lemma arr_subt (sh : SubT S T) (h : t₁.arr t₂ = T) :
   ∃ s₁ s₂, SubT t₁ s₁ ∧ SubT s₂ t₂ ∧ S = (.arr s₁ s₂) := by
