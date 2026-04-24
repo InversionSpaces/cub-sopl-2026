@@ -29,6 +29,10 @@ def SList.assoc [DecidableEq α]
 instance (α : Type*) [DecidableEq α] : Inhabited (SList α) where
   default := ⟨[], by simp⟩
 
+@[simp, grind]
+def forall_valid {α : Type} [Inhabited α] (ls : List α) (P : α → Prop) : Prop :=
+  ∀ i < ls.length, P ls[i]!
+
 inductive type
 | boolean
 | nat
@@ -51,12 +55,16 @@ inductive WellFormedType : type → Prop
 | top : WellFormedType type.top
 
 inductive SubT : type → type → Prop
-| Refl (s : type) : SubT s s
+| Refl (s : type) :
+  WellFormedType s →
+  SubT s s
 | Trans (s u v : type) :
   SubT s u →
   SubT u v →
   SubT s v
-| Top (s : type) : SubT s (.top)
+| Top (s : type) :
+  WellFormedType s →
+  SubT s (.top)
 | Arrow (s1 s2 t1 t2 : type) :
   SubT t1 s1 →
   SubT s2 t2 →
@@ -66,15 +74,21 @@ inductive SubT : type → type → Prop
   tpl'.length = tps'.length →
   tpl'.IsPrefix tpl →
   tps'.IsPrefix tps →
+  (forall_valid tps WellFormedType) →
+  (forall_valid tps' WellFormedType) →
   SubT (.rcd tps tpl) (.rcd tps' tpl')
 | RcdDepth (tpl : SList Label) (tps tps' : List type) :
   tpl.length = tps.length →
   tpl.length = tps'.length →
+  (forall_valid tps WellFormedType) →
+  (forall_valid tps' WellFormedType) →
   (∀ i < tps.length, SubT tps'[i]! tps[i]!) →
   SubT (.rcd tps' tpl) (.rcd tps tpl)
 | RcdPerm (tpl tpl': SList Label) (tps tps': List type) :
   tpl.length = tps.length →
   tpl'.length = tps'.length →
+  (forall_valid tps WellFormedType) →
+  (forall_valid tps' WellFormedType) →
   (∀ i < tpl.length, ∃ j < tpl'.length,
     tpl.elems[i]! = tpl'.elems[j]! ∧ tps[i]! = tps'[j]!) →
   SubT (.rcd tps' tpl') (.rcd tps tpl)
@@ -108,24 +122,13 @@ inductive Value : Term → Prop
   (∀ i < tpt.length, Value tpt[i]!) →
   Value (Term.Rcd tpt tpl)
 
-structure TCtx where
-  ts : List type
-  wf : ∀ tp ∈ ts, WellFormedType tp
+abbrev TCtx := List type
 
 @[simp, grind]
-def TCtx.types (Γ : TCtx) (x : Nat) (tp : type) : Prop := Γ.ts[x]? = tp
+def TCtx.types (Γ : TCtx) (x : Nat) (tp : type) : Prop := Γ[x]? = some tp
 
 @[simp, grind]
-def TCtx.length (Γ : TCtx) : Nat := Γ.ts.length
-
-@[simp, grind]
-def TCtx.insert (Γ : TCtx) (tp : type) (h : WellFormedType tp) : TCtx :=
-  ⟨tp :: Γ.ts, by
-    intro tp' htp'
-    cases htp'
-    · assumption
-    · apply TCtx.wf
-      · assumption⟩
+def TCtx.insert (Γ : TCtx) (tp : type) : TCtx := tp :: Γ
 
 -- For keys specifically
 theorem SList.Perm.key_correspondence [DecidableEq α] [Inhabited α]
@@ -140,10 +143,12 @@ inductive Typ : TCtx → Term → type → Prop
 | Ttrue : Typ Γ .trueT type.boolean
 | Tfalse : Typ Γ .falseT type.boolean
 | TVar (x : Nat) (Γ : TCtx) (tp : type) :
+  WellFormedType tp →
   Γ.types x tp →
   Typ Γ (.Var x) tp
-| TAbs (t : Term) (Γ : TCtx) (tp₁ tp₂ : type) (h : WellFormedType tp₁) :
-  Typ (Γ.insert tp₁ h) t tp₂ →
+| TAbs (t : Term) (Γ : TCtx) (tp₁ tp₂ : type) :
+  WellFormedType tp₁ →
+  Typ (Γ.insert tp₁) t tp₂ →
   Typ Γ (t.Abs tp₁) (tp₁.arr tp₂)
 | TApp (t₁ t₂ : Term) (Γ : TCtx) (tp₁ tp₂ : type) :
   Typ Γ t₁ (tp₁.arr tp₂) →
@@ -173,6 +178,7 @@ inductive Typ : TCtx → Term → type → Prop
         (Γ : TCtx)  (tps : List type) (tp : type) :
   Typ Γ t (.rcd tps tpl) →
   tpl.assoc l tps tp →
+  (forall_valid tps WellFormedType) →
   Typ Γ (.Proj t l) tp
 | TSub (t : Term) (S T : type) (Γ : TCtx):
   Typ Γ t S →
@@ -270,26 +276,41 @@ lemma betar_preservation (t s : Term) (S T : type) (Γ Γ₁ : TCtx) :
   Γ₂ = Γ₁ ++ S :: Γ → Typ (Γ₁ ++ Γ) s S → Typ Γ₂ t T → Typ (Γ₁ ++ Γ) (betar Γ₁.length t s) T := by
     intro heq hs ht
     unhygienic induction ht generalizing Γ₁ S s
-    iterate 2 { grind [Typ, betar] }
-    { rw [betar]
-      repeat' split <;> grind [Typ] }
-    { rw [betar]
+    case TAbs =>
+      rw [betar]
       apply Typ.TAbs
-      have ih := a_ih (shift_up s) S (tp₁ :: Γ₁) (by grind) (by
-        rw [shift_up]
-        have typ_lm := beta_typ tp₁ S (Γ₁ := []) (Γ := Γ₁ ++ Γ) (by grind) hs
-        grind)
-      grind }
-    all_goals { grind [betar, Typ] }
+      · assumption
+      · have ih := a_ih (shift_up s) S (tp₁ :: Γ₁) (by grind) (by
+          rw [shift_up]
+          have typ_lm := beta_typ tp₁ S (Γ₁ := []) (Γ := Γ₁ ++ Γ) (by grind) hs
+          grind)
+        grind
+    case TVar =>
+      rw [betar]
+      repeat' split <;> grind [Typ]
+    all_goals (grind [Typ, betar])
+
+lemma subtyp_is_well_formed {S T : type} (hs : SubT S T) : WellFormedType S ∧ WellFormedType T := by
+  induction hs
+  all_goals (try grind [SubT, WellFormedType])
+
+lemma typ_is_well_formed {t : Term} {tp : type} (h : Typ Γ t tp) : WellFormedType tp := by
+  induction h
+  all_goals (try grind [Typ, WellFormedType, subtyp_is_well_formed])
 
 lemma typ_respects_length {tpl : SList Label} {tps : List type}
   (h : Typ Γ t (.rcd tps tpl)) : tps.length = tpl.length := by
   generalize h1 : type.rcd tps tpl = T at h
   induction h generalizing tps tpl <;> cases h1
-  all_goals (try grind)
-
-
-  sorry
+  case TApp =>
+    rename_i ht _
+    apply typ_is_well_formed at ht
+    grind [WellFormedType]
+  case TSub =>
+    rename_i hs
+    apply subtyp_is_well_formed at hs
+    grind [WellFormedType]
+  all_goals (try grind [WellFormedType, typ_is_well_formed])
 
 lemma rcd_proj_sub {tpl : SList Label} {tps : List type}
   (he : tpl.length = tps.length) (hs : SubT S (.rcd tps tpl)) :
@@ -302,7 +323,7 @@ lemma rcd_proj_sub {tpl : SList Label} {tps : List type}
     repeat (constructor <;> try assumption)
     intro l tp ha
     exists tp
-    grind [SubT]
+    grind [SubT, WellFormedType]
   · rename_i ih1 _ ih2
     rcases ih2 he (by rfl) with ⟨tpl', tps', hs, hl, ha⟩
     rcases ih1 hl (by grind) with ⟨tpl'', tps'', hs', hl', ha'⟩
@@ -314,7 +335,7 @@ lemma rcd_proj_sub {tpl : SList Label} {tps : List type}
     have ⟨tp'', htp', hl''⟩ := ha' l tp' hl'
     exists tp''
     grind [SubT]
-  · rename_i tpl1 tpl2 tps1 tps2 _ _ _ hps
+  · rename_i tpl1 tpl2 tps1 tps2 _ _ _ hps _ _
     have hpl : tpl2.elems.IsPrefix tpl1.elems := by grind [SList.IsPrefix]
     exists tpl1
     exists tps1
@@ -325,11 +346,11 @@ lemma rcd_proj_sub {tpl : SList Label} {tps : List type}
     · grind [SubT]
     · rcases ha with ⟨i, hi, heql, heqs⟩
       grind [List.prefix_iff_getElem?.mp hpl i, List.prefix_iff_getElem?.mp hps i]
-  · rename_i tpl tps tps' _ _ ihs ih
+  · rename_i tpl tps tps' _ _ ihs ih _ _
     exists tpl
     exists tps'
     repeat (constructor <;> try grind)
-  · rename_i tpl1 tpl2 tps1 tps2 _ _ ih
+  · rename_i tpl1 tpl2 tps1 tps2 _ _ _ _ ih
     exists tpl2
     exists tps2
     repeat (constructor <;> try grind)
@@ -359,26 +380,26 @@ lemma rcd_typ {tpt : List Term} {tps : List type}
 lemma arr_subt (sh : SubT S T) (h : t₁.arr t₂ = T) :
   ∃ s₁ s₂, SubT t₁ s₁ ∧ SubT s₂ t₂ ∧ S = (.arr s₁ s₂) := by
   induction sh generalizing t₁ t₂
-  · grind [SubT]
-  · rename_i ih1 ih2
+  case Trans =>
+    rename_i ih1 ih2
     rcases ih2 h with ⟨s₁, s₂, hs1, hs2, hu⟩
     rcases ih1 hu.symm with ⟨s₃, s₄, hs3, hs4, hp⟩
     grind [SubT]
-  · contradiction
-  · grind
+  all_goals (grind [SubT, WellFormedType])
 
 lemma ctx_subt (sh : SubT s₁ s₂)
   (ht : Typ (Γ ++ s₂ :: Γ') t T) : Typ (Γ ++ s₁ :: Γ') t T := by
   generalize h1 : Γ ++ s₂ :: Γ' = Γ₁ at ht
   induction ht generalizing Γ
-  all_goals (try grind [Typ])
-  · rename_i x _ tp htyp
+  case TVar =>
+    rename_i x _ tp htyp _
     by_cases h : x = Γ.length
     · have he : tp = s₂ := by grind
       apply Typ.TSub (S := s₁)
-      · grind [Typ]
+      · grind [Typ, subtyp_is_well_formed]
       · grind
     · grind [Typ]
+  all_goals (try grind [Typ])
 
 lemma abs_typ {tp tp₁ tp₂ : type}
   (h : Typ Γ (t.Abs tp) (tp₁.arr tp₂)) :
@@ -401,38 +422,35 @@ theorem preservation (t t' : Term) (tp : type) (Γ : TCtx) :
   Step t t' → Typ Γ t tp → Typ Γ t' tp := by
     intro hs ht
     induction ht generalizing t'
-    · grind [Step]
-    · grind [Step]
-    · grind [Step]
-    · grind [Step]
-    · cases hs
-      · grind [Typ]
-      · grind [Typ]
-      · apply betar_preservation (Γ₁ := [])
-        · rfl
-        · assumption
-        · apply abs_typ
-          · assumption
-    · cases hs <;> grind [Typ]
-    · grind [Step]
-    · cases hs
-      grind [Typ]
-    · cases hs
-      · grind [Typ]
-      · grind [Typ]
-      · rename_i nv _ _
-        clear * - nv
-        induction nv
-        · constructor
-        · constructor
-          assumption
-    · cases hs
+    case TApp =>
+      cases hs
       repeat grind [Typ]
-    · cases hs
+      apply betar_preservation (Γ₁ := [])
+      · rfl
+      · assumption
+      · apply abs_typ
+        assumption
+    case Tite =>
+      cases hs <;> grind [Typ]
+    case TSucc =>
+      cases hs
+      grind [Typ]
+    case TPred =>
+      cases hs
+      repeat grind [Typ]
+      rename_i nv _ _
+      clear * - nv
+      induction nv <;> grind [NatValue, Typ]
+    case TIsZero =>
+      cases hs
+      repeat grind [Typ]
+    case TRcd =>
+      cases hs
       constructor
       repeat grind
-    · cases hs <;> grind [Typ, rcd_typ]
-    · grind [Step, Typ]
+    case TProj =>
+      cases hs <;> grind [Typ, rcd_typ, typ_respects_length]
+    all_goals (grind [Step, Typ])
 
 lemma nat_value_from (ht : Typ Γ t type.nat) (hv : Value t) : NatValue t := by
   sorry
