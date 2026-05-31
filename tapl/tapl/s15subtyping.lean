@@ -1,6 +1,5 @@
 import Mathlib.Tactic.Basic
-import Mathlib.Data.Set.Basic
-import Mathlib.Data.List.AList
+import Mathlib.Data.List.Nodup
 import Mathlib.Data.List.Induction
 
 namespace Subtyping
@@ -16,8 +15,6 @@ structure SList (α : Type*) [DecidableEq α] where
 def SList.length [DecidableEq α] (s : SList α) : Nat := s.elems.length
 
 def SList.IsPrefix [DecidableEq α] (s t : SList α) : Prop := s.elems.IsPrefix t.elems
-
-def SList.Perm [DecidableEq α] (s t : SList α) : Prop := s.elems.Perm t.elems
 
 def SList.Subperm [DecidableEq α] (s t : SList α) : Prop := s.elems.Subperm t.elems
 
@@ -129,15 +126,6 @@ def TCtx.types (Γ : TCtx) (x : Nat) (tp : type) : Prop := Γ[x]? = some tp
 
 @[simp, grind]
 def TCtx.insert (Γ : TCtx) (tp : type) : TCtx := tp :: Γ
-
--- For keys specifically
-theorem SList.Perm.key_correspondence [DecidableEq α] [Inhabited α]
-    (s t : SList α) (h : s.elems.Perm t.elems)
-    (i : Fin s.elems.length) :
-    ∃ j : Fin t.elems.length,
-      s.elems[i]! = t.elems[j]! := by
-  obtain ⟨j, hj, heq⟩ := List.mem_iff_getElem.mp (h.mem_iff.mp (List.getElem_mem i.isLt))
-  exact ⟨⟨j, hj⟩, by grind⟩
 
 inductive Typ : TCtx → Term → type → Prop
 | Ttrue : Typ Γ .trueT type.boolean
@@ -262,7 +250,7 @@ inductive Step : Term → Term → Prop
 | Proj (t t' : Term) (l : Label) :
   Step t t' →
   Step (.Proj t l) (.Proj t' l)
-| ProjRcd (tpt : List Term) (tpl : SList Label) (l : Label)(t : Term) :
+| ProjRcd (tpt : List Term) (tpl : SList Label) (l : Label) (t : Term) :
   Value (.Rcd tpt tpl) →
   tpl.assoc l tpt t →
   Step (.Proj (.Rcd tpt tpl) l) t
@@ -312,53 +300,137 @@ lemma typ_respects_length {tpl : SList Label} {tps : List type}
     grind [WellFormedType]
   all_goals (try grind [WellFormedType, typ_is_well_formed])
 
-lemma rcd_proj_sub {tpl : SList Label} {tps : List type}
-  (he : tpl.length = tps.length) (hs : SubT S (.rcd tps tpl)) :
-  ∃ tpl' tps', S = (.rcd tps' tpl') ∧ tpl'.length = tps'.length ∧
+lemma subt_respects_length {tpl : SList Label} {tps : List type}
+  (h : SubT S (.rcd tps tpl)) : tpl.length = tps.length := by
+  rcases subtyp_is_well_formed h with ⟨_, wf⟩
+  generalize he : type.rcd tps tpl = T at wf
+  induction wf
+  all_goals (try contradiction)
+  case rcd =>
+    cases he
+    grind
+
+-- For this lemma I gave up, proved by an LLM
+lemma rcd_proj_sub {tpl : SList Label} {tps : List type} (hs : SubT S (.rcd tps tpl)) :
+  ∃ tpl' tps', S = (.rcd tps' tpl') ∧
+    tpl'.length = tps'.length ∧ tpl.Subperm tpl' ∧
      ∀ l tp, tpl.assoc l tps tp → ∃ tp', SubT tp' tp ∧ tpl'.assoc l tps' tp' := by
-  generalize h1 : type.rcd tps tpl = T at hs
-  induction hs generalizing tps tpl <;> cases h1
-  · exists tpl
-    exists tps
-    repeat (constructor <;> try assumption)
-    intro l tp ha
-    exists tp
-    grind [SubT, WellFormedType]
-  · rename_i ih1 _ ih2
-    rcases ih2 he (by rfl) with ⟨tpl', tps', hs, hl, ha⟩
-    rcases ih1 hl (by grind) with ⟨tpl'', tps'', hs', hl', ha'⟩
-    exists tpl''
-    exists tps''
-    repeat (constructor <;> try assumption)
-    intro l tp hla
-    have ⟨tp', htp, hl'⟩ := ha l tp hla
-    have ⟨tp'', htp', hl''⟩ := ha' l tp' hl'
-    exists tp''
-    grind [SubT]
-  · rename_i tpl1 tpl2 tps1 tps2 _ _ _ hps _ _
-    have hpl : tpl2.elems.IsPrefix tpl1.elems := by grind [SList.IsPrefix]
-    exists tpl1
-    exists tps1
-    repeat (constructor <;> try assumption)
-    intro l tp ha
-    exists tp
-    constructor
-    · grind [SubT]
-    · rcases ha with ⟨i, hi, heql, heqs⟩
-      grind [List.prefix_iff_getElem?.mp hpl i, List.prefix_iff_getElem?.mp hps i]
-  · rename_i tpl tps tps' _ _ ihs ih _ _
-    exists tpl
-    exists tps'
-    repeat (constructor <;> try grind)
-  · rename_i tpl1 tpl2 tps1 tps2 _ _ _ _ ih
-    exists tpl2
-    exists tps2
-    repeat (constructor <;> try grind)
-    intro l tp ha
-    rcases ha with ⟨i, hi, heql, heqs⟩
-    have ⟨j, _, _, _⟩ := ih i hi
-    exists tps2[j]!
-    grind [SubT]
+  have he : tpl.length = tps.length := subt_respects_length hs
+  generalize hT : type.rcd tps tpl = T at hs
+  induction hs generalizing tps tpl
+  all_goals (try contradiction)
+  · cases hT
+    refine ⟨tpl, tps, rfl, ?_, ?_, ?_⟩
+    · assumption
+    · exact List.Subperm.refl _
+    · intro l tp ha
+      exact ⟨tp, SubT.Refl _ (by grind [WellFormedType]), ha⟩
+  · cases hT
+    rename_i ih1 _ ih2
+    rcases ih2 he (by rfl) with ⟨tpl', tps', hs, hl, hsp, ha⟩
+    rcases ih1 hl hs.symm with ⟨tpl'', tps'', hs', hl', hsp', ha'⟩
+    refine ⟨tpl'', tps'', hs', hl', ?_, ?_⟩
+    · exact List.Subperm.trans hsp hsp'
+    · intro l tp hla
+      have ⟨tp', htp, hl''⟩ := ha l tp hla
+      have ⟨tp'', htp', hl'''⟩ := ha' l tp' hl''
+      exact ⟨tp'', SubT.Trans _ _ _ htp' htp, hl'''⟩
+  · rename_i tpl_src tpl_tgt tps_src tps_tgt hlen_src hlen_tgt hpl_pref hps_pref hwf_src hwf_tgt
+    cases hT
+    have hpl : tpl_tgt.elems.IsPrefix tpl_src.elems := hpl_pref
+    refine ⟨tpl_src, tps_src, rfl, hlen_src, ?_, ?_⟩
+    · exact List.Sublist.subperm (List.IsPrefix.sublist hpl)
+    · intro l tp ha
+      rcases ha with ⟨i, hi, heql, heqs⟩
+      have hi_tgt : i < tps_tgt.length := by
+        have : tpl_tgt.length = tps_tgt.length := hlen_tgt
+        grind
+      have htp_eq : tps_tgt[i]! = tp := List.getElem!_of_getElem? heqs
+      have hwf_tp : WellFormedType tp := htp_eq ▸ hwf_tgt i hi_tgt
+      refine ⟨tp, SubT.Refl _ hwf_tp, ?_⟩
+      have hi_src_lbl : i < tpl_src.length := by
+        have hsub_l : tpl_tgt.elems.length ≤ tpl_src.elems.length := hpl.length_le
+        simp only [SList.length] at hi ⊢
+        omega
+      have hi_lbl_tgt : i < tpl_tgt.elems.length := by simp only [SList.length] at hi; exact hi
+      have hi_tps_tgt : i < tps_tgt.length := hi_tgt
+      refine ⟨i, hi_src_lbl, ?_, ?_⟩
+      · have hp : tpl_src.elems[i]? = some tpl_tgt.elems[i] :=
+          List.prefix_iff_getElem?.mp hpl i hi_lbl_tgt
+        rw [hp]
+        rw [List.getElem?_eq_some_iff] at heql
+        exact congrArg some heql.2
+      · have hp : tps_src[i]? = some tps_tgt[i] :=
+          List.prefix_iff_getElem?.mp hps_pref i hi_tps_tgt
+        rw [hp]
+        rw [List.getElem?_eq_some_iff] at heqs
+        exact congrArg some heqs.2
+  · rename_i tpl0 tps_tgt tps_src hlen_tgt hlen_src hwf_tgt hwf_src hsub ih
+    cases hT
+    refine ⟨tpl0, tps_src, rfl, ?_, List.Subperm.refl _, ?_⟩
+    · grind
+    · intro l tp ha
+      rcases ha with ⟨i, hi, heql, heqs⟩
+      have hi_src : i < tps_src.length := by
+        have : tpl0.length = tps_src.length := hlen_src
+        have : tpl0.length = tps_tgt.length := hlen_tgt
+        grind
+      have hi_tgt : i < tps_tgt.length := by
+        have : tpl0.length = tps_tgt.length := hlen_tgt
+        grind
+      have heq_tp : tps_tgt[i]! = tp := List.getElem!_of_getElem? heqs
+      refine ⟨tps_src[i]!, ?_, ?_⟩
+      · have := hsub i hi_tgt
+        rw [heq_tp] at this
+        exact this
+      · refine ⟨i, hi, heql, ?_⟩
+        rw [List.getElem?_eq_getElem hi_src, getElem!_pos tps_src i hi_src]
+  · rename_i tpl_tgt tpl_src tps_tgt tps_src hlen_tgt hlen_src hwf_tgt hwf_src hcorr
+    cases hT
+    refine ⟨tpl_src, tps_src, rfl, hlen_src, ?_, ?_⟩
+    · have hsubset : ∀ x ∈ tpl_tgt.elems, x ∈ tpl_src.elems := by
+        intro x hx
+        rcases List.mem_iff_getElem.mp hx with ⟨i, hi, hxi⟩
+        have hi_lbl : i < tpl_tgt.elems.length := hi
+        have hi' : i < tpl_tgt.length := by simp only [SList.length]; exact hi
+        have ⟨j, hj, heq, _⟩ := hcorr i hi'
+        have hxi' : tpl_tgt.elems[i]! = x := by
+          rw [getElem!_pos tpl_tgt.elems i hi_lbl]; exact hxi
+        rw [hxi'] at heq
+        rw [heq]
+        have hj_lbl : j < tpl_src.elems.length := by simp only [SList.length] at hj; exact hj
+        rw [getElem!_pos tpl_src.elems j hj_lbl]
+        exact List.getElem_mem hj_lbl
+      apply List.subperm_ext_iff.mpr
+      intro x hx
+      have hmem := hsubset x hx
+      have hcount1 : tpl_tgt.elems.count x ≤ 1 := List.nodup_iff_count_le_one.mp tpl_tgt.nodup x
+      have hcount2 : 1 ≤ tpl_src.elems.count x := List.count_pos_iff.mpr hmem
+      omega
+    · intro l tp ha
+      rcases ha with ⟨i, hi, heql, heqs⟩
+      have hi' : i < tpl_tgt.length := hi
+      have hi_lbl : i < tpl_tgt.elems.length := by simp only [SList.length] at hi; exact hi
+      have hi_tps_tgt : i < tps_tgt.length := by
+        have : tpl_tgt.length = tps_tgt.length := hlen_tgt
+        simp only [SList.length] at hi; grind
+      have ⟨j, hj, hjl, hjs⟩ := hcorr i hi'
+      have hj_lbl : j < tpl_src.elems.length := by simp only [SList.length] at hj; exact hj
+      have hj_tps : j < tps_src.length := by
+        have : tpl_src.length = tps_src.length := hlen_src
+        simp only [SList.length] at hj; grind
+      have hl_eq : tpl_tgt.elems[i]! = l := List.getElem!_of_getElem? heql
+      have hs_eq : tps_tgt[i]! = tp := List.getElem!_of_getElem? heqs
+      have hl_src : tpl_src.elems[j]! = l := by rw [← hjl, hl_eq]
+      have hs_src : tps_src[j]! = tp := by rw [← hjs, hs_eq]
+      refine ⟨tps_src[j]!, ?_, ?_⟩
+      · rw [hs_src]
+        exact SubT.Refl _ (hs_eq ▸ hwf_tgt i hi_tps_tgt)
+      · refine ⟨j, hj, ?_, ?_⟩
+        · rw [List.getElem?_eq_getElem hj_lbl,
+              ← getElem!_pos tpl_src.elems j hj_lbl, hl_src]
+        · rw [List.getElem?_eq_getElem hj_tps,
+              ← getElem!_pos tps_src j hj_tps, hs_src]
 
 lemma rcd_typ {tpt : List Term} {tps : List type}
   {tpl1 tpl2 : SList Label} {tp : type}
@@ -373,9 +445,43 @@ lemma rcd_typ {tpt : List Term} {tps : List type}
   · cases h1
     cases h2
     rename_i ht ih hs
-    rcases rcd_proj_sub he hs with ⟨tpl', tps', _, _, ha⟩
+    rcases rcd_proj_sub hs with ⟨tpl', tps', _, _, _, ha⟩
     rcases ha l tp hts with ⟨tp', hstp, ha'⟩
     grind [Typ]
+
+lemma rcd_proj_typ {tp : type} {tps : List type} {tpl : SList Label}
+  (hv : Value t) (ht : Typ Γ t (.rcd tps tpl)) (ha : tpl.assoc l tps tp) :
+  ∃ tpt tpl', t = (.Rcd tpt tpl') ∧ tpl'.length = tpt.length ∧
+  tpl.Subperm tpl' ∧ ∃ t', tpl'.assoc l tpt t' := by
+  generalize hT : type.rcd tps tpl = T at ht
+  induction ht generalizing tps tpl tp
+  all_goals (try contradiction)
+  case TRcd =>
+    rename_i tpt tpl' _ tps' _ _ _ _
+    exists tpt
+    exists tpl'
+    constructor
+    · rfl
+    · constructor
+      · assumption
+      · cases hT
+        rcases ha with ⟨i, _, _, _⟩
+        constructor
+        · exists tpl'.elems
+        · exists tpt[i]!
+          grind
+  case TSub =>
+    rename_i ih
+    cases hT
+    rcases rcd_proj_sub (by assumption) with ⟨tpl', tps', _, hl', hsp_outer, ha⟩
+    rcases ha l tp (by assumption) with ⟨tp', hs', ha'⟩
+    rcases ih (tps := tps') (tpl := tpl') hv ha' (by grind)
+      with ⟨tpt, tpl'', _, _, hsp_inner, ha''⟩
+    refine ⟨tpt, tpl'', ?_, ?_, ?_, ?_⟩
+    · assumption
+    · assumption
+    · exact List.Subperm.trans hsp_outer hsp_inner
+    · assumption
 
 lemma arr_subt (sh : SubT S T) (h : t₁.arr t₂ = T) :
   ∃ s₁ s₂, SubT t₁ s₁ ∧ SubT s₂ t₂ ∧ S = (.arr s₁ s₂) := by
@@ -386,6 +492,20 @@ lemma arr_subt (sh : SubT S T) (h : t₁.arr t₂ = T) :
     rcases ih1 hu.symm with ⟨s₃, s₄, hs3, hs4, hp⟩
     grind [SubT]
   all_goals (grind [SubT, WellFormedType])
+
+lemma bool_subt (sh : SubT S type.boolean) : S = type.boolean := by
+  generalize h : type.boolean = T at sh
+  induction sh
+  all_goals (try contradiction)
+  · rfl
+  · grind
+
+lemma nat_subt (sh : SubT S type.nat) : S = type.nat := by
+  generalize h : type.nat = T at sh
+  induction sh
+  all_goals (try contradiction)
+  · rfl
+  · grind
 
 lemma ctx_subt (sh : SubT s₁ s₂)
   (ht : Typ (Γ ++ s₂ :: Γ') t T) : Typ (Γ ++ s₁ :: Γ') t T := by
@@ -453,25 +573,20 @@ theorem preservation (t t' : Term) (tp : type) (Γ : TCtx) :
     all_goals (grind [Step, Typ])
 
 lemma nat_value_from (ht : Typ Γ t type.nat) (hv : Value t) : NatValue t := by
-  sorry
-  -- cases ht <;> cases hv <;> grind
+  generalize h : type.nat = T at ht
+  induction ht <;> cases h
+  all_goals (try contradiction)
+  · grind [NatValue]
+  · cases hv
+    grind [NatValue]
+  · grind [NatValue, nat_subt]
 
 lemma bool_value_from (ht : Typ Γ t type.boolean) (hv : Value t) :
   t = .trueT ∨ t = .falseT := by
-  sorry
-  -- cases ht <;> cases hv
-  -- all_goals (try contradiction)
-  -- · grind
-  -- · grind
-
-lemma rcd_value_from (tpl : SList Label) (tps : List type)
-  (ht : Typ Γ t (.rcd tps tpl)) (hv : Value t) :
-  ∃ tpt, t = .Rcd tpt tpl ∧ tpt.length = tps.length ∧
-  (∀ i < tps.length, Typ Γ tpt[i]! tps[i]! ∧ Value tpt[i]!) := by
-  sorry
-  -- cases ht <;> cases hv
-  -- all_goals (try contradiction)
-  -- grind
+  generalize h : type.boolean = T at ht
+  induction ht
+  all_goals (try contradiction)
+  repeat grind [bool_subt]
 
 lemma p_prefix [Inhabited α] {P : α → Prop} (ls : List α) (h : ∃ i < ls.length, ¬P ls[i]!) :
   ∃ i < ls.length, ¬P ls[i]! ∧ ∀ j < i, P ls[j]! := by
@@ -485,119 +600,140 @@ lemma p_prefix [Inhabited α] {P : α → Prop} (ls : List α) (h : ∃ i < ls.l
       grind
     · grind
 
+lemma arr_value {tp1 tp2 : type} (ht : Typ Γ t (.arr tp1 tp2)) (hv : Value t) :
+  ∃ t' tp1', t = .Abs t' tp1' ∧ SubT tp1 tp1' := by
+  generalize h1 : tp1.arr tp2 = T at ht
+  induction ht generalizing tp1 tp2
+  all_goals (try contradiction)
+  case TAbs =>
+    rename_i t' _ tp1' _ _ _ _
+    exists t'
+    exists tp1'
+    grind [Typ, SubT]
+  case TSub =>
+    rename_i ih
+    cases h1
+    rename_i hs
+    cases hs
+    · grind
+    · rename_i hsSu hsu
+      rcases arr_subt hsu (by rfl) with ⟨_, _, _, _, hp⟩
+      cases hp
+      rcases arr_subt hsSu (by rfl) with ⟨_, _, _, _, hp⟩
+      cases hp
+      grind [SubT]
+    · grind [SubT]
+
 theorem progress (t : Term) (td : Typ [] t T) :
   Value t ∨ ∃ t', Step t t' := by
-  sorry
-  -- generalize h : [] = Γ at td
-  -- induction td
-  -- · grind [Value]
-  -- · grind [Value]
-  -- · grind
-  -- · grind [Value]
-  -- · rename_i ht _ ih1 ih2
-  --   cases ih1 h
-  --   · rename_i tp₁ tp₂ a hv
-  --     generalize hp : tp₁.arr tp₂ = tp at ht
-  --     cases ht <;> cases hv
-  --     all_goals (try contradiction)
-  --     cases ih2 h
-  --     · rename_i t2 _ t _ _ _ _
-  --       right
-  --       exists subst t t2
-  --       solve_by_elim
-  --     · rename_i t tp _ _  hs
-  --       have ⟨ t2', _ ⟩ := hs
-  --       right
-  --       exists (t.Abs tp).App t2'
-  --       solve_by_elim
-  --   · rename_i t2 _ _ _ _ hs
-  --     have ⟨ t1', _ ⟩ := hs
-  --     right
-  --     exists (.App t1' t2)
-  --     solve_by_elim
-  -- · rename_i ihc iht ihe
-  --   cases ihc h
-  --   · rename_i t1 t2 _ _ _ _ _ _
-  --     right
-  --     cases bool_value_from (by assumption) (by assumption)
-  --     · exists t1
-  --       rename_i hc
-  --       rw [hc]
-  --       solve_by_elim
-  --     · exists t2
-  --       rename_i hc
-  --       rw [hc]
-  --       solve_by_elim
-  --   · rename_i t1 t2 _ _ _ _ _ hs
-  --     have ⟨ ct', _ ⟩ := hs
-  --     right
-  --     exists (.ite ct' t1 t2)
-  --     solve_by_elim
-  -- · grind [Value, NatValue]
-  -- · rename_i ih
-  --   cases ih h
-  --   · cases nat_value_from (by assumption) (by assumption)
-  --     · grind [Value, NatValue]
-  --     · grind [Value, NatValue]
-  --   · rename_i hs
-  --     have ⟨ t', _ ⟩ := hs
-  --     right
-  --     exists (.Succ t')
-  --     solve_by_elim
-  -- · rename_i ih
-  --   cases ih h
-  --   · cases nat_value_from (by assumption) (by assumption)
-  --     · right
-  --       exists .Zero
-  --       solve_by_elim
-  --     · rename_i t _ _ _
-  --       right
-  --       exists t
-  --       solve_by_elim
-  --   · rename_i hs
-  --     have ⟨ t', _ ⟩ := hs
-  --     right
-  --     exists (.Pred t')
-  --     solve_by_elim
-  -- · rename_i ht ih
-  --   cases ih h
-  --   · rename_i hv
-  --     have nv := nat_value_from (by assumption) hv
-  --     right
-  --     cases nv
-  --     · exists .trueT
-  --       solve_by_elim
-  --     · exists .falseT
-  --       solve_by_elim
-  --   · rename_i hs
-  --     have ⟨ t', _ ⟩ := hs
-  --     right
-  --     exists (.IsZero t')
-  --     solve_by_elim
-  -- · rename_i tpt tpl _ tps h1 h2 hl ih
-  --   by_cases hv : ∀ i < tpt.length, Value tpt[i]!
-  --   · left
-  --     grind [Value]
-  --   · have ⟨ i, hi, hnv, hvs ⟩ : ∃ i < tpt.length,
-  --           ¬Value tpt[i]! ∧ ∀ j < i, Value tpt[j]! := by
-  --       apply p_prefix
-  --       grind
-  --     have ⟨ t', _ ⟩ : ∃ t', Step tpt[i]! t' := by grind
-  --     right
-  --     exists (.Rcd (tpt.set i t') tpl)
-  --     grind [Step]
-  -- · rename_i ih
-  --   cases ih h
-  --   · cases rcd_value_from _ _ (by assumption) (by assumption)
-  --     rename_i ah _ tpt _
-  --     rcases ah with ⟨ i, _, _, _ ⟩
-  --     right
-  --     exists tpt[i]!
-  --     grind [Step]
-  --   · rename_i hs
-  --     have ⟨ t', _ ⟩ := hs
-  --     right
-  --     exists (.Proj t' (by assumption))
-  --     grind [Step]
+  generalize h : [] = Γ at td
+  induction td <;> cases h
+  case Ttrue => grind [Value]
+  case Tfalse => grind [Value]
+  case TVar => grind
+  case TAbs => grind [Value]
+  case TZero => grind [Value, NatValue]
+  case TApp =>
+    rename_i t1 t2 _ _ _ _ ih1 ih2
+    cases ih1 rfl <;> cases ih2 rfl <;> right
+    · rcases arr_value (by assumption) (by assumption) with ⟨t', tp1', he, hs⟩
+      cases he
+      exists (subst t' t2)
+      grind [Step]
+    · rename_i hs
+      have ⟨t', hs'⟩ := hs
+      exists (t1.App t')
+      grind [Step]
+    · rename_i hs _
+      have ⟨t', hs'⟩ := hs
+      exists (t'.App t2)
+      grind [Step]
+    · rename_i hs _
+      have ⟨t', hs'⟩ := hs
+      exists (t'.App t2)
+      grind [Step]
+  case Tite =>
+    right
+    rename_i t1 t2 _ _ _ _ cih _ _
+    cases cih rfl
+    · cases bool_value_from (by assumption) (by assumption)
+      · exists t1
+        grind [Step]
+      · exists t2
+        grind [Step]
+    · rename_i hs
+      have ⟨t', _⟩ := hs
+      exists (.ite t' t1 t2)
+      grind [Step]
+  case TSucc =>
+    rename_i ih
+    cases ih rfl
+    · grind [Value, NatValue, nat_value_from]
+    · right
+      rename_i hs
+      have ⟨t', _⟩ := hs
+      exists (.Succ t')
+      grind [Step]
+  case TPred =>
+    rename_i ih
+    cases ih rfl
+    · cases nat_value_from (by assumption) (by assumption)
+      · right
+        exists .Zero
+        grind [Step]
+      · right
+        rename_i t' _ _ _
+        exists t'
+        grind [Step]
+    · rename_i hs
+      have ⟨t', _⟩ := hs
+      right
+      exists (.Pred t')
+      grind [Step]
+  case TIsZero =>
+    rename_i ih
+    cases ih rfl
+    · cases nat_value_from (by assumption) (by assumption)
+      · right
+        exists .trueT
+        grind [Step]
+      · right
+        exists .falseT
+        grind [Step]
+    · rename_i hs
+      have ⟨t', _⟩ := hs
+      right
+      exists (.IsZero t')
+      grind [Step]
+  case TRcd =>
+    rename_i tpt tpl tps _ _ _ ih
+    by_cases h : ∃ i < tpt.length, ¬Value tpt[i]!
+    · have ⟨i, hl, hnv, hp⟩ := p_prefix (P := fun t => Value t) tpt h
+      right
+      cases ih i hl rfl
+      · contradiction
+      · rename_i hs
+        have ⟨t', _⟩ := hs
+        exists (.Rcd (tpt.set i t') tpl)
+        grind [Step]
+    · grind [Value]
+  case TProj =>
+    rename_i l tpl tps tp ha _ _ ih
+    cases ih rfl
+    · right
+      rename_i hv
+      rcases rcd_proj_typ hv (by assumption) ha
+        with ⟨tpt, tpl', he, hl, _, t', ha'⟩
+      cases he
+      exists t'
+      grind [Step]
+    · rename_i hs
+      have ⟨t', _⟩ := hs
+      right
+      exists (.Proj t' l)
+      grind [Step]
+  case TSub =>
+    rename_i ih
+    exact ih rfl
 
 end Subtyping
